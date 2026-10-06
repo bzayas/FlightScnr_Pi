@@ -354,7 +354,7 @@ export class SettingsUI {
             );
             status.textContent = list.length || e.target.value.length < 2 ? '' : 'No matches.';
           } catch (err) {
-            if (err.name !== 'AbortError') status.textContent = this.portal ? 'Search needs internet. Enter coordinates below instead.' : `Search failed: ${err.message}`;
+            if (err.name !== 'AbortError') status.textContent = this.portal ? 'Search needs internet. Enter coordinates below instead.' : 'Couldn’t reach the place search. Enter the coordinates below instead.';
           }
         }, 280);
       },

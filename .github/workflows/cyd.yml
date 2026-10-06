@@ -102,6 +102,15 @@ jobs:
             cyd/installer/firmware/*.bin
             cyd/installer/firmware/manifest.json
 
+      # Unzip and run `python3 -m http.server 8080` inside it, then open
+      # http://localhost:8080 in Chrome/Edge to flash from your own machine.
+      - uses: actions/upload-artifact@v4
+        with:
+          name: flightscnr-cyd-installer
+          path: |
+            cyd/installer
+            !cyd/installer/tools
+
       - uses: actions/upload-artifact@v4
         with:
           name: simulator-screenshots

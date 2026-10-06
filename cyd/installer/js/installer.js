@@ -12,7 +12,7 @@
 
 import { CFG_PARTITION, defaults, normalize, toDeviceJson, validate } from './schema.js';
 import { SECTIONS, SettingsUI, h, svgIcon, tile, toast } from './settings.js';
-import { Device, buildConfigBlob, imageFromFile, loadManifest, webSerialSupported } from './flasher.js';
+import { Device, buildConfigBlob, imageFromFile, loadManifest, webSerialAllowed, webSerialSupported } from './flasher.js';
 
 const STORE_KEY = 'fs-cyd-settings-v1';
 const MANIFEST_URL = 'firmware/manifest.json';
@@ -72,6 +72,9 @@ class InstallerUI extends SettingsUI {
         h('div', { class: 'shots' },
           h('img', { src: 'img/p_face_night.webp', width: 240, height: 360, alt: 'Night theme radar face' }),
           h('img', { src: 'img/p_face_day.webp', width: 200, height: 300, alt: 'Day theme radar face' }))),
+      webSerialSupported() && !webSerialAllowed() && h('div', { class: 'group' }, h('div', { class: 'note warn' }, h('span', {}, '⚠️'), h('div', {},
+        h('p', {}, h('b', {}, 'USB access is blocked where this page is open, so it can’t flash from here.'), ' You can still go through every setting and see how it all fits together.'),
+        h('p', {}, 'To install, open the installer in its own Chrome or Edge tab: from the project’s GitHub Pages site, or locally with ', h('code', {}, 'python3 cyd/installer/tools/dev_server.py'), '.')))),
       !webSerialSupported() && h('div', { class: 'group' }, h('div', { class: 'note warn' }, h('span', {}, '⚠️'), h('div', {},
         h('p', {}, h('b', {}, 'This browser can’t talk to USB devices.'), ' Installing needs Chrome, Edge or Opera on a Windows, macOS, Linux or ChromeOS computer (Web Serial).'),
         h('p', {}, 'You can still fill in your settings here and save them to a file, then load that file on a supported computer.')))),
@@ -166,7 +169,7 @@ class InstallerUI extends SettingsUI {
       const dev = state.device;
       devLabel.textContent = dev ? `${dev.chip}${dev.mac ? ` · ${dev.mac}` : ''}` : 'Not connected';
       connectBtn.textContent = dev ? 'Disconnect' : 'Connect…';
-      connectBtn.disabled = state.busy || !webSerialSupported();
+      connectBtn.disabled = state.busy || !webSerialAllowed();
       const needFw = mode !== 'settings';
       installBtn.disabled = state.busy || !dev || (needFw && !state.firmware) || (mode !== 'firmware' && errors.length > 0);
       installBtn.lastChild.textContent = mode === 'settings' ? 'Write settings' : 'Install';
@@ -189,6 +192,8 @@ class InstallerUI extends SettingsUI {
         const msg = String(e.message || e);
         status.textContent = /No port selected|cancel/i.test(msg)
           ? 'No port chosen.'
+          : /SecurityError|permissions policy|disallowed/i.test(msg)
+            ? 'USB access is blocked here. Open the installer in its own browser tab.'
           : /timed out|Failed to connect|Invalid head/i.test(msg)
             ? 'The board didn’t answer. Hold BOOT, tap RESET, release BOOT and try again.'
             : /open|busy|in use/i.test(msg)
@@ -304,6 +309,10 @@ class InstallerUI extends SettingsUI {
     });
 
     setTimeout(refresh);
+    if (!webSerialAllowed())
+      status.textContent = webSerialSupported()
+        ? 'USB access is blocked where this page is open. Open the installer in its own tab to flash.'
+        : 'This browser can’t flash over USB. Use Chrome or Edge on a computer.';
     loadFirmware().then(() => {
       renderFw();
       refresh();

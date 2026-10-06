@@ -141,6 +141,18 @@ export function imageFromFile(name, bytes) {
 
 export const webSerialSupported = () => 'serial' in navigator;
 
+// False when the page is embedded somewhere that blocks USB access
+// (Permissions Policy), e.g. inside a preview frame.
+export function webSerialAllowed() {
+  if (!webSerialSupported()) return false;
+  try {
+    const pp = document.permissionsPolicy || document.featurePolicy;
+    return !(pp && typeof pp.allowsFeature === 'function' && !pp.allowsFeature('serial'));
+  } catch {
+    return true;
+  }
+}
+
 export class Device {
   constructor(log) {
     this.log = log || (() => {});
