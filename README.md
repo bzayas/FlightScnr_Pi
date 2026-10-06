@@ -211,6 +211,10 @@ Optional **LiveATC** streams to a USB or Bluetooth speaker — pick airport and 
 
 Also included: scrollable **list pickers** for on-device settings, portal **Route Sources** / **Position Sources**, alert mode, facing / orientation, favorite locations (HUD Home icon), optional **LoFi** under LiveATC, a boot safety disclaimer, and portal OTA (**Update Now**, **Later tonight**, off-hours auto-install, **Finish install**, **Repair & Update**). See the [Features wiki](https://github.com/yashmulgaonkar/FlightScnr_Pi/wiki/Features) for the full list.
 
+### Also on the ESP32 Cheap Yellow Display
+
+[`cyd/`](cyd/README.md) is a native port to the 4.0″ ESP32-32E “Cheap Yellow Display” (320×480 ST7796S). It has a radar watch face with Apple Watch-style complications, automatic day/night themes and Bluetooth audio, and installs from the browser.
+
 ---
 
 ## Documentation

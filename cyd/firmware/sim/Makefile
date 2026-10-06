@@ -61,4 +61,14 @@ $(foreach s,$(APP_SRC),$(eval $(call cxx_rule,$(s))))
 clean:
 	rm -rf $(BUILD)
 
-.PHONY: all clean
+.PHONY: all clean check
+
+# Installer <-> firmware settings schema check (needs node).
+$(BUILD)/test_config: test_config.cpp $(FW)/src/core/config.cpp $(FW)/src/core/config.h
+	@mkdir -p $(BUILD)
+	$(CXX) $(OPT) -std=gnu++17 -DARDUINOJSON_USE_DOUBLE=1 -I$(FW)/src -I$(AJSON) -o $@ test_config.cpp $(FW)/src/core/config.cpp
+
+check: $(BUILD)/test_config
+	node ../../installer/tools/check_schema.mjs $(abspath $(BUILD)/test_config)
+
+.PHONY: check

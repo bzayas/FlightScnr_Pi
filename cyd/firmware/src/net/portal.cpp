@@ -56,7 +56,8 @@ static bool serve_asset(const String& uri) {
   const PortalAsset* a = find_asset(uri == "/" ? String("/index.html") : uri);
   if (!a) return false;
   server.sendHeader("Content-Encoding", "gzip");
-  server.sendHeader("Cache-Control", uri == "/" ? "no-cache" : "max-age=3600");
+  /* no-cache: after a firmware update the page and its modules must match */
+  server.sendHeader("Cache-Control", "no-cache");
   server.send_P(200, a->mime, (const char*)a->data, a->len);
   return true;
 }
