@@ -266,8 +266,23 @@ void display_init(uint8_t rotation, uint16_t draw_lines) {
   lcd.configure(g_cfg.spi80, g_cfg.invert, g_cfg.bgr);
   lcd.init();
   lcd.setRotation(s_rotation);
-  lcd.setBrightness(0);
   lcd.fillScreen(TFT_BLACK);
+  /* Splash with the backlight on straight away: proves the panel works
+   * even if a later start-up stage fails (a repeating splash = boot loop). */
+  {
+    const int w = lcd.width(), h = lcd.height(), r = (w < h ? w : h) / 4;
+    lcd.drawCircle(w / 2, h / 2 - 20, r, lcd.color565(0, 160, 0));
+    lcd.drawCircle(w / 2, h / 2 - 20, r / 2, lcd.color565(0, 110, 0));
+    lcd.setTextDatum(lgfx::middle_center);
+    lcd.setTextColor(TFT_WHITE);
+    lcd.setFont(&fonts::FreeSansBold12pt7b);
+    lcd.drawString("FlightScnr", w / 2, h / 2 + r + 10);
+    lcd.setFont(&fonts::Font2);
+    lcd.setTextColor(lcd.color565(140, 140, 140));
+    lcd.drawString("Starting " FS_VERSION, w / 2, h / 2 + r + 40);
+  }
+  s_bl_cur = 60;
+  lcd.setBrightness(92); /* = 60% on the perceptual curve used below */
   lcd.initDMA();
   lcd.startWrite(); /* keep the bus; touch reads release it as needed */
   cal_load();

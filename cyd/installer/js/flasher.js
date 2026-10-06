@@ -171,6 +171,7 @@ export class Device {
   async connect(baud = 460800) {
     const { ESPLoader, Transport } = await import(ESPTOOL_URL);
     const port = await navigator.serial.requestPort();
+    this.port = port;
     this.transport = new Transport(port, false);
     const term = {
       clean: () => {},
@@ -239,4 +240,84 @@ export class Device {
     this.loader = null;
     this.transport = null;
   }
+}
+
+/* ---- device log (serial monitor) ---------------------------------------- */
+
+// Streams what the firmware prints at 115200 baud. reset() pulses EN through
+// the board's auto-reset circuit (RTS), with IO0 high (DTR off): a normal boot.
+export class SerialLog {
+  constructor(onText) {
+    this.onText = onText;
+    this.port = null;
+    this.reader = null;
+    this.stopped = true;
+  }
+
+  get open() {
+    return !!this.port;
+  }
+
+  async start(port, baud = 115200) {
+    await port.open({ baudRate: baud });
+    this.port = port;
+    this.stopped = false;
+    this.loop();
+  }
+
+  async loop() {
+    const decoder = new TextDecoder();
+    while (this.port && this.port.readable && !this.stopped) {
+      this.reader = this.port.readable.getReader();
+      try {
+        for (;;) {
+          const { value, done } = await this.reader.read();
+          if (done) break;
+          if (value) this.onText(decoder.decode(value, { stream: true }));
+        }
+      } catch {
+        /* framing noise during reset: keep reading */
+      } finally {
+        this.reader.releaseLock();
+        this.reader = null;
+      }
+    }
+  }
+
+  async reset() {
+    if (!this.port) return;
+    await this.port.setSignals({ dataTerminalReady: false, requestToSend: true });
+    await new Promise((r) => setTimeout(r, 150));
+    await this.port.setSignals({ dataTerminalReady: false, requestToSend: false });
+  }
+
+  async stop() {
+    this.stopped = true;
+    try {
+      await this.reader?.cancel();
+    } catch {
+      /* already released */
+    }
+    try {
+      await this.port?.close();
+    } catch {
+      /* already closed */
+    }
+    this.port = null;
+  }
+}
+
+// What a boot log says, in plain words (null when nothing stands out).
+// Judges the latest boot: the text after the last firmware banner.
+export function diagnoseLog(text) {
+  const i = text.lastIndexOf('[sys] FlightScnr CYD');
+  const boot = i >= 0 ? text.slice(i) : text;
+  const crashed = /Guru Meditation|Backtrace:|abort\(\) was called|stack overflow/;
+  if (/Brownout detector was triggered/.test(text) || /last reset: BROWNOUT/.test(boot))
+    return { level: 'err', text: 'The board keeps resetting because its power supply dips (brownout). Try another USB port or cable: a port on the computer itself, a powered hub, or a 5 V 1 A (or stronger) USB charger.' };
+  if (crashed.test(boot) || (crashed.test(text) && !/\[sys\] ready/.test(boot)))
+    return { level: 'err', text: 'The firmware crashed while starting. Press Copy log and send the log so the bug can be fixed.' };
+  if (/assertion failed/.test(boot)) return { level: 'err', text: 'The UI library hit an internal error (often out of memory). Press Copy log and send it.' };
+  if (/\[sys\] ready/.test(boot)) return { level: 'ok', text: 'The firmware started normally. If the screen is still dark, the display itself isn’t responding; copy the log and send it.' };
+  return null;
 }

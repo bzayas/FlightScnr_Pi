@@ -12,7 +12,7 @@
 
 import { CFG_PARTITION, asset, defaults, normalize, toDeviceJson, validate } from './schema.js';
 import { SECTIONS, SettingsUI, h, svgIcon, tile, toast } from './settings.js';
-import { Device, buildConfigBlob, imageFromFile, loadManifest, webSerialAllowed, webSerialSupported } from './flasher.js';
+import { Device, SerialLog, buildConfigBlob, diagnoseLog, imageFromFile, loadManifest, webSerialAllowed, webSerialSupported } from './flasher.js';
 
 const STORE_KEY = 'fs-cyd-settings-v1';
 const MANIFEST_URL = 'firmware/manifest.json';
@@ -208,9 +208,11 @@ class InstallerUI extends SettingsUI {
       readBtn.disabled = state.busy || !dev;
       erase.disabled = mode !== 'all' || state.busy;
       if (mode !== 'all') erase.checked = false;
+      refreshLog();
     }
 
     async function connect() {
+      if (state.serial?.open) await stopLog();
       state.busy = true;
       refresh();
       status.textContent = 'Choose the USB serial port in the browser prompt…';
@@ -218,6 +220,7 @@ class InstallerUI extends SettingsUI {
       try {
         const info = await dev.connect();
         state.device = { dev, ...info, mac: dev.mac };
+        state.lastPort = dev.port;
         status.textContent = 'Connected.';
         toast('Device connected');
       } catch (e) {
@@ -272,6 +275,8 @@ class InstallerUI extends SettingsUI {
           h('p', {}, 'Read and accept the safety notice on screen. FlightScnr then joins ', h('b', {}, state.cfg.wifi.ssid || 'its setup hotspot'), ' and the radar fills in within a few seconds.'),
           h('p', {}, 'Later, change settings from any browser at ', h('a', { href: `http://${state.cfg.wifi.host || 'flightscnr'}.local`, target: '_blank', rel: 'noopener' }, `http://${state.cfg.wifi.host || 'flightscnr'}.local`), ', or right on the device.'))));
         toast('Install complete');
+        state.busy = false;
+        await startLog(true); /* watch it boot */
       } catch (e) {
         status.textContent = `Failed: ${e.message || e}. Unplug the board, plug it back in, and try again.`;
         log(`install: ${e.stack || e}`);
@@ -281,6 +286,80 @@ class InstallerUI extends SettingsUI {
       state.busy = false;
       refresh();
     }
+
+    /* ---- device log ---- */
+    const logText = h('div', { class: 'console', role: 'log', 'aria-label': 'Device log' }, state.serialText || '');
+    const logHint = h('div', { hidden: true });
+    const logStatus = h('small', { class: 'muted' }, 'Shows what the board prints while it starts. Handy when the screen stays dark.');
+    const showHint = () => {
+      const d = diagnoseLog(state.serialText || '');
+      logHint.hidden = !d;
+      if (d) logHint.replaceChildren(h('div', { class: `note ${d.level}` }, h('span', {}, d.level === 'ok' ? '✅' : '⚠️'), h('p', {}, d.text)));
+    };
+    const appendLog = (t) => {
+      state.serialText = ((state.serialText || '') + t).slice(-60000);
+      const atEnd = logText.scrollTop + logText.clientHeight >= logText.scrollHeight - 8;
+      logText.textContent = state.serialText;
+      if (atEnd) logText.scrollTop = logText.scrollHeight;
+      showHint();
+    };
+    state.logSink = appendLog; /* the open log keeps writing into whichever page is showing */
+    const logBtn = h('button', { type: 'button', class: 'btn', onclick: () => (state.serial?.open ? stopLog() : startLog(false)) });
+    const restartBtn = h('button', { type: 'button', class: 'btn', onclick: async () => { appendLog('\n--- restarting the board ---\n'); await state.serial?.reset(); } }, 'Restart board');
+    const copyBtn = h('button', {
+      type: 'button',
+      class: 'btn',
+      onclick: async () => {
+        try {
+          await navigator.clipboard.writeText(state.serialText || '');
+          toast('Log copied');
+        } catch {
+          const r = document.createRange();
+          r.selectNodeContents(logText);
+          getSelection().removeAllRanges();
+          getSelection().addRange(r);
+          toast('Log selected: press Ctrl+C / ⌘C');
+        }
+      },
+    }, 'Copy log');
+    function refreshLog() {
+      const on = !!state.serial?.open;
+      logBtn.textContent = on ? 'Stop' : 'Show device log';
+      logBtn.disabled = state.busy || !!state.device;
+      restartBtn.disabled = !on;
+    }
+    // auto: right after an install, reuse the port the user already picked.
+    async function startLog(auto) {
+      try {
+        let port = state.lastPort;
+        if (!port) {
+          const granted = await navigator.serial.getPorts();
+          port = granted.length === 1 ? granted[0] : null;
+        }
+        if (!port) {
+          if (auto) return;
+          port = await navigator.serial.requestPort();
+        }
+        state.lastPort = port;
+        state.serial = new SerialLog((t) => state.logSink?.(t));
+        await state.serial.start(port);
+        appendLog(`\n--- device log (115200 baud), ${new Date().toLocaleTimeString()} ---\n`);
+        logStatus.textContent = 'Listening. The board was restarted so you see it from the beginning.';
+        await state.serial.reset();
+      } catch (e) {
+        state.serial = null;
+        logStatus.textContent = /No port selected/i.test(String(e)) ? 'No port chosen.' : `Couldn’t open the port: ${e.message || e}. Close other serial monitors and try again.`;
+      }
+      refreshLog();
+    }
+    async function stopLog() {
+      await state.serial?.stop();
+      state.serial = null;
+      logStatus.textContent = 'Stopped.';
+      refreshLog();
+    }
+    refreshLog();
+    showHint();
 
     const readBtn = h('button', {
       type: 'button',
@@ -362,6 +441,9 @@ class InstallerUI extends SettingsUI {
         h('div', { class: 'row stack' }, h('div', { class: 'btns' }, installBtn, status), progress),
       ], 'The settings slot is written last and verified, so a half-finished install never leaves the device with broken settings.'),
       after,
+      this.group('Device log', [
+        h('div', { class: 'row stack' }, h('div', { class: 'btns' }, logBtn, restartBtn, copyBtn), logStatus, logHint, logText),
+      ], 'If the display stays dark after installing, open this with the board plugged in and send the log.'),
       this.group('Settings file', [h('div', { class: 'row' }, h('div', { class: 'btns' }, readBtn, saveBtn, h('button', { type: 'button', class: 'btn', onclick: () => loadInput.click() }, 'Load from file…'), loadInput))],
         'Your settings are kept in this browser (without the Wi-Fi password and API key) so you can come back later.'),
       h('section', { class: 'group' }, logBox),

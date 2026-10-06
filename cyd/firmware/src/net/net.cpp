@@ -13,6 +13,7 @@
 
 #include <ESPmDNS.h>
 #include <WiFi.h>
+#include <esp_system.h>
 #include <esp_wifi.h>
 
 #include "core/config.h"
@@ -638,6 +639,11 @@ void net_init() {
   WiFi.persistent(false);
   WiFi.setHostname(nc.host[0] ? nc.host : "flightscnr");
   WiFi.mode(WIFI_STA);
+  if (esp_reset_reason() == ESP_RST_BROWNOUT) {
+    /* Weak USB supply: transmit power peaks are what pull the rail down. */
+    WiFi.setTxPower(WIFI_POWER_11dBm);
+    Serial.println("[net] last reset was a brownout: Wi-Fi transmit power lowered to 11 dBm");
+  }
   WiFi.setAutoReconnect(true);
   if (g_cfg.audio_out != AUDIO_BLUETOOTH) WiFi.setSleep(false); /* coexistence needs modem sleep */
   s_disconnected_since = millis();

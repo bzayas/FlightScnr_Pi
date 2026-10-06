@@ -20,6 +20,7 @@
 
 #include <Arduino.h>
 #include <Preferences.h>
+#include <esp_system.h>
 #include <lvgl.h>
 #include <nvs_flash.h>
 
@@ -35,6 +36,25 @@
 #include "ui/ui.h"
 
 extern bool g_bt_mem_kept;
+
+/* LVGL layout + our renderers nest deeper than Arduino's default 8 KB. */
+SET_LOOP_TASK_STACK_SIZE(16 * 1024);
+
+static const char* reset_reason_name(esp_reset_reason_t r) {
+  switch (r) {
+    case ESP_RST_POWERON: return "power on";
+    case ESP_RST_EXT: return "reset pin";
+    case ESP_RST_SW: return "software restart";
+    case ESP_RST_PANIC: return "CRASH (panic)";
+    case ESP_RST_INT_WDT: return "CRASH (interrupt watchdog)";
+    case ESP_RST_TASK_WDT: return "CRASH (task watchdog)";
+    case ESP_RST_WDT: return "CRASH (watchdog)";
+    case ESP_RST_DEEPSLEEP: return "deep sleep";
+    case ESP_RST_BROWNOUT: return "BROWNOUT (power supply dipped)";
+    case ESP_RST_SDIO: return "SDIO";
+    default: return "unknown";
+  }
+}
 void platform_service_save();
 void plat_flush_save();
 
@@ -114,6 +134,8 @@ void setup() {
   Serial.begin(115200);
   Serial.printf("\n[sys] FlightScnr CYD %s - port of FlightScnr Pi by Yash Mulgaonkar (CC BY-NC-SA 4.0)\n",
                 FS_VERSION);
+  Serial.printf("[boot] last reset: %s, heap %u\n", reset_reason_name(esp_reset_reason()),
+                (unsigned)plat_free_heap());
   pinMode(PIN_BOOT_KEY, INPUT_PULLUP);
   for (int pin : {PIN_LED_R, PIN_LED_G, PIN_LED_B}) {
     pinMode(pin, OUTPUT);
@@ -135,8 +157,11 @@ void setup() {
 
   /* Smaller draw buffers when Bluetooth Classic owns ~100 KB of RAM. */
   display_init(g_cfg.rotation, g_bt_mem_kept ? 16 : 32);
+  Serial.printf("[boot] display ok, heap %u\n", (unsigned)plat_free_heap());
   ui_init(display_width(), display_height());
+  Serial.printf("[boot] ui ok, heap %u\n", (unsigned)plat_free_heap());
   audio_init();
+  Serial.printf("[boot] audio ok, heap %u\n", (unsigned)plat_free_heap());
   net_init();
   Serial.printf("[sys] ready, heap %u (min %u)\n", (unsigned)plat_free_heap(), (unsigned)plat_min_free_heap());
 }
