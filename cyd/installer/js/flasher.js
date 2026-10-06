@@ -130,11 +130,12 @@ export async function loadManifest(url, onStatus) {
   return { version: man.version || '', name: man.name || 'FlightScnr CYD', parts };
 }
 
-// A user-picked .bin: a merged image (flash at 0x0) or just the app (0x10000).
+// A user-picked .bin: a merged image (flash at 0x0: bootloader at 0x1000,
+// partition table at 0x8000) or just the app (0x10000).
 export function imageFromFile(name, bytes) {
-  if (bytes[0] !== 0xe9) throw new Error('not an ESP32 image (missing 0xE9 magic)');
-  const merged = bytes.length > 0x8002 && bytes[0x8000] === 0xaa && bytes[0x8001] === 0x50;
-  return { version: name, name, parts: [{ address: merged ? 0 : 0x10000, data: bytes, name }] };
+  const merged = bytes.length > 0x10000 && bytes[0x1000] === 0xe9 && bytes[0x8000] === 0xaa && bytes[0x8001] === 0x50;
+  if (!merged && bytes[0] !== 0xe9) throw new Error(`${name} isn’t an ESP32 firmware image`);
+  return { version: '', name, parts: [{ address: merged ? 0 : 0x10000, data: bytes, name }] };
 }
 
 /* ---- device session ----------------------------------------------------- */

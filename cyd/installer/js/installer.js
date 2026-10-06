@@ -110,12 +110,44 @@ class InstallerUI extends SettingsUI {
         ? issues.map((i) => h('li', {}, h('span', { class: `dot ${i.level === 'error' ? 'err' : 'warn'}` }), h('div', {}, i.text, ' ', h('a', { href: `#${i.section}` }, 'Fix'))))
         : h('li', {}, h('span', { class: 'dot' }), h('div', {}, 'Settings look good.')));
 
+    // USB blocked (e.g. an embedded preview): nothing to flash with here,
+    // so say how to get the real installer instead of showing dead controls.
+    if (!webSerialAllowed()) {
+      const why = webSerialSupported()
+        ? 'This page is open inside a frame that blocks USB, so it can’t reach your board. Everything else here is a working preview.'
+        : 'This browser can’t talk to USB devices. Installing needs Chrome or Edge on a Windows, macOS, Linux or ChromeOS computer.';
+      return [
+        this.header('Install', 'Connect the display with USB, then write the firmware and your settings in one go.'),
+        this.group('Before you install', [checklist]),
+        this.group('Install from your own browser tab', [
+          h('div', { class: 'row stack' },
+            h('div', { class: 'note warn' }, h('span', {}, '⚠️'), h('p', {}, why)),
+            h('ol', { class: 'steps' },
+              h('li', {}, 'On GitHub, open the repository’s ', h('b', {}, 'Actions'), ' tab and the latest ', h('b', {}, 'CYD firmware & installer'), ' run. Download ', h('b', {}, 'flightscnr-cyd-installer'), ' from its Artifacts. It contains this installer and the firmware.'),
+              h('li', {}, 'Unzip it, open a terminal in that folder and run ', h('code', {}, 'python3 -m http.server 8080'), '.'),
+              h('li', {}, 'Open ', h('code', {}, 'http://localhost:8080'), ' in Chrome or Edge, fill in your settings, plug in the display and press Install. The firmware version shows up there automatically.'))),
+        ], 'Settings you enter here stay in this preview. The local installer keeps its own copy.'),
+      ];
+    }
+
     // firmware
-    const fwLabel = h('span', { class: 'value' });
+    const fwBox = h('div', { class: 'card' });
     const renderFw = () => {
-      fwLabel.textContent = state.firmware ? `${state.firmware.name.replace(/^FlightScnr /, '')} ${state.firmware.version}`.trim() : state.firmwareErr || 'Loading…';
+      const pick = (label, primary) =>
+        h('button', { type: 'button', class: `btn ${primary ? 'primary' : 'small link'}`, onclick: () => fileInput.click() }, label);
+      if (state.firmware) {
+        const name = `${state.firmware.name.replace(/^FlightScnr /, '')} ${state.firmware.version}`.trim();
+        fwBox.replaceChildren(this.row('Version', null, h('span', { class: 'btns' }, h('span', { class: 'value' }, name), pick('Use a different file…'))));
+      } else if (state.firmwareErr) {
+        fwBox.replaceChildren(h('div', { class: 'row stack' },
+          h('div', { class: 'note' }, h('span', {}, 'ℹ️'), h('div', {},
+            h('p', {}, h('b', {}, 'No firmware is bundled with this copy of the installer.'), ' Choose the file to flash:'),
+            h('p', {}, h('code', {}, 'flightscnr-cyd-<version>.bin'), ' from the ', h('b', {}, 'flightscnr-cyd-firmware'), ' download of the latest build (the whole image, written at 0x0), or ', h('code', {}, 'firmware.bin'), ' from your own PlatformIO build (written at 0x10000).'))),
+          h('div', { class: 'btns' }, pick('Choose firmware file…', true))));
+      } else {
+        fwBox.replaceChildren(this.row('Version', null, h('span', { class: 'value' }, 'Loading…')));
+      }
     };
-    renderFw();
     const fileInput = h('input', {
       type: 'file',
       accept: '.bin',
@@ -140,7 +172,7 @@ class InstallerUI extends SettingsUI {
     const connectBtn = h('button', { type: 'button', class: 'btn', onclick: () => (state.device ? disconnect() : connect()) });
 
     // mode
-    let mode = state.firmware || !state.firmwareErr ? 'all' : 'settings';
+    let mode = 'all'; /* Install stays disabled until there is firmware to write */
     const modeSeg = h('div', { class: 'seg' }, [['all', 'Firmware + settings'], ['settings', 'Settings only'], ['firmware', 'Firmware only']].map(([v, t]) =>
       h('button', { type: 'button', 'aria-pressed': String(v === mode), onclick: (e) => { mode = v; for (const b of modeSeg.children) b.setAttribute('aria-pressed', String(b === e.currentTarget)); refresh(); } }, t)));
     const erase = h('input', { type: 'checkbox', role: 'switch', checked: false, 'aria-label': 'Erase flash first' });
@@ -308,6 +340,7 @@ class InstallerUI extends SettingsUI {
       },
     });
 
+    renderFw();
     setTimeout(refresh);
     if (!webSerialAllowed())
       status.textContent = webSerialSupported()
@@ -321,10 +354,7 @@ class InstallerUI extends SettingsUI {
     return [
       this.header('Install', 'Connect the display with USB, then write the firmware and your settings in one go.'),
       this.group('Before you install', [checklist]),
-      this.group('Firmware', [
-        this.row('Version', null, fwLabel),
-        h('div', { class: 'row' }, h('div', { class: 'label' }, h('small', { class: 'muted' }, 'Built your own? Pick a merged image (written at 0x0) or a PlatformIO firmware.bin (written at 0x10000).')), h('button', { type: 'button', class: 'btn small', onclick: () => fileInput.click() }, 'Use a file…'), fileInput),
-      ]),
+      h('section', { class: 'group' }, h('div', { class: 'caption' }, 'Firmware'), fwBox, fileInput),
       this.group('Device', [
         this.row('Display', null, h('span', { class: 'btns' }, devLabel, connectBtn)),
         this.row('Write', null, modeSeg),
@@ -344,7 +374,7 @@ async function loadFirmware() {
   try {
     state.firmware = await loadManifest(MANIFEST_URL);
   } catch (e) {
-    state.firmwareErr = location.protocol === 'file:' ? 'Open this page from a web server to load firmware' : 'No published firmware here. Pick a file.';
+    state.firmwareErr = 'none';
   }
 }
 
