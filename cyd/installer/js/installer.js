@@ -10,7 +10,7 @@
 // FlightScnr CYD web installer: collect settings, then flash firmware and a
 // settings blob over Web Serial so the device boots fully configured.
 
-import { CFG_PARTITION, defaults, normalize, toDeviceJson, validate } from './schema.js';
+import { CFG_PARTITION, asset, defaults, normalize, toDeviceJson, validate } from './schema.js';
 import { SECTIONS, SettingsUI, h, svgIcon, tile, toast } from './settings.js';
 import { Device, buildConfigBlob, imageFromFile, loadManifest, webSerialAllowed, webSerialSupported } from './flasher.js';
 
@@ -70,8 +70,8 @@ class InstallerUI extends SettingsUI {
             h('a', { class: 'btn primary big', href: '#wifi' }, 'Start setup'),
             h('a', { class: 'btn big', href: '#install' }, 'Skip to install'))),
         h('div', { class: 'shots' },
-          h('img', { src: 'img/p_face_night.webp', width: 240, height: 360, alt: 'Night theme radar face' }),
-          h('img', { src: 'img/p_face_day.webp', width: 200, height: 300, alt: 'Day theme radar face' }))),
+          h('img', { src: asset('img/p_face_night.webp'), width: 240, height: 360, alt: 'Night theme radar face' }),
+          h('img', { src: asset('img/p_face_day.webp'), width: 200, height: 300, alt: 'Day theme radar face' }))),
       webSerialSupported() && !webSerialAllowed() && h('div', { class: 'group' }, h('div', { class: 'note warn' }, h('span', {}, '⚠️'), h('div', {},
         h('p', {}, h('b', {}, 'USB access is blocked where this page is open, so it can’t flash from here.'), ' You can still go through every setting and see how it all fits together.'),
         h('p', {}, 'To install, open the installer in its own Chrome or Edge tab: from the project’s GitHub Pages site, or locally with ', h('code', {}, 'python3 cyd/installer/tools/dev_server.py'), '.')))),
@@ -90,7 +90,7 @@ class InstallerUI extends SettingsUI {
         h('li', {}, h('b', {}, 'First boot'), ' shows the safety notice. Tap Accept. If touches land in the wrong place, the touch calibration starts by itself.'),
         h('li', {}, h('b', {}, 'Change things later'), ' on the device (swipe to Settings, or long-press the face to customise it), or from any browser at ', h('code', {}, `http://${this.cfg.wifi.host || 'flightscnr'}.local`), '.'),
       ))]),
-      h('section', { class: 'group' }, h('div', { class: 'caption' }, 'A look around'), h('div', { class: 'gallery' }, shots.map(([f, cap]) => h('figure', {}, h('img', { src: `img/${f}`, loading: 'lazy', alt: cap, width: f.startsWith('l_') ? 270 : 180, height: f.startsWith('l_') ? 180 : 270 }), cap)))),
+      h('section', { class: 'group' }, h('div', { class: 'caption' }, 'A look around'), h('div', { class: 'gallery' }, shots.map(([f, cap]) => h('figure', {}, h('img', { src: asset(`img/${f}`), loading: 'lazy', alt: cap, width: f.startsWith('l_') ? 270 : 180, height: f.startsWith('l_') ? 180 : 270 }), cap)))),
       this.group('Board not showing up?', [h('div', { class: 'row stack' }, h('ul', {},
         h('li', {}, 'Try another cable or USB port; avoid hubs.'),
         h('li', {}, 'Windows may need the ', h('a', { href: 'https://www.wch-ic.com/downloads/CH341SER_EXE.html', target: '_blank', rel: 'noopener' }, 'CH340 driver ↗'), '. macOS and Linux include it.'),

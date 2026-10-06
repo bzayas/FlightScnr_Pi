@@ -10,7 +10,7 @@
 // Web Serial flashing (esptool-js) and the settings blob that the firmware's
 // config_store.cpp reads from the `fscfg` partition.
 
-import { CFG_FLAG_INSTALLER, CFG_HEADER_SIZE, CFG_PARTITION, CFG_SLOT_SIZE } from './schema.js';
+import { CFG_FLAG_INSTALLER, CFG_HEADER_SIZE, CFG_PARTITION, CFG_SLOT_SIZE, asset } from './schema.js';
 
 export const ESPTOOL_URL = 'https://unpkg.com/esptool-js@0.7.0/bundle.js';
 
@@ -115,7 +115,7 @@ export function parseConfigBlob(raw) {
 
 // ESP Web Tools manifest -> [{address, data, name}]
 export async function loadManifest(url, onStatus) {
-  const res = await fetch(url, { cache: 'no-cache' });
+  const res = await fetch(asset(url), { cache: 'no-cache' });
   if (!res.ok) throw new Error(`firmware manifest not found (${res.status})`);
   const man = await res.json();
   const build = (man.builds || []).find((b) => /^ESP32$/i.test(b.chipFamily)) || (man.builds || [])[0];
@@ -123,7 +123,8 @@ export async function loadManifest(url, onStatus) {
   const parts = [];
   for (const p of build.parts) {
     onStatus?.(`Downloading ${p.path}…`);
-    const r = await fetch(new URL(p.path, new URL(url, location.href)), { cache: 'no-cache' });
+    const key = url.slice(0, url.lastIndexOf('/') + 1) + p.path; /* e.g. firmware/firmware.bin */
+    const r = await fetch(asset(key) !== key ? asset(key) : new URL(p.path, new URL(url, location.href)), { cache: 'no-cache' });
     if (!r.ok) throw new Error(`${p.path}: HTTP ${r.status}`);
     parts.push({ address: p.offset, data: new Uint8Array(await r.arrayBuffer()), name: p.path });
   }

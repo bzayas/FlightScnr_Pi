@@ -95,6 +95,15 @@ jobs:
       - name: Package firmware for the installer
         run: python3 tools/package_firmware.py ../installer/firmware
 
+      - name: Build the single-file installer
+        run: python3 ../installer/tools/build_standalone.py ../installer/flightscnr-cyd-installer.html
+
+      # One HTML file with the firmware inside: download, double-click, flash.
+      - uses: actions/upload-artifact@v4
+        with:
+          name: flightscnr-cyd-installer-single-file
+          path: cyd/installer/flightscnr-cyd-installer.html
+
       - uses: actions/upload-artifact@v4
         with:
           name: flightscnr-cyd-firmware
@@ -110,6 +119,7 @@ jobs:
           path: |
             cyd/installer
             !cyd/installer/tools
+            !cyd/installer/flightscnr-cyd-installer.html
 
       - uses: actions/upload-artifact@v4
         with:

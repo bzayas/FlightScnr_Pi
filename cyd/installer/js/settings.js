@@ -336,7 +336,7 @@ export class SettingsUI {
       results.replaceChildren();
       renderFields();
       this.changed('loc');
-      toast(`Location set${p.name ? ` to ${p.name}` : ''}`);
+      toast(`Location set${p.name && p.name !== 'My Location' ? ` to ${p.name}` : ''}`);
     };
     const search = h('input', {
       type: 'search',
@@ -367,9 +367,15 @@ export class SettingsUI {
         status.textContent = 'Finding you…';
         try {
           const p = await currentPosition();
-          const name = await placeName(p.lat, p.lon);
-          apply({ ...p, name: name || 'My Location', tz: browserTimeZone() });
+          // Coordinates first; the place name follows when (if) the lookup answers.
+          apply({ ...p, name: 'My Location', tz: browserTimeZone() });
           status.textContent = `Accurate to about ${Math.round(p.acc)} m.`;
+          placeName(p.lat, p.lon).then((name) => {
+            if (!name || c.loc.lat !== +(+p.lat).toFixed(5) || c.loc.name !== 'My Location') return;
+            c.loc.name = name.slice(0, 47);
+            renderFields();
+            this.changed('loc.name');
+          });
         } catch (e) {
           status.textContent = e.message;
         }

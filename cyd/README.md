@@ -93,6 +93,24 @@ The installer can also:
 
 Your settings stay in your browser. The Wi-Fi password and API key are kept in memory only.
 
+### Single-file installer (nothing to host)
+
+The same installer also ships as **one HTML file with the firmware inside**: `flightscnr-cyd-installer.html`, about 4 MB. Download it from the latest *CYD firmware & installer* run under Actions, artifact **flightscnr-cyd-installer-single-file**, then double-click it to open it in Chrome or Edge.
+
+Opened from disk it is a normal browser tab, so everything works:
+- USB flashing.
+- *Use my current location*.
+- Place search.
+- The Tomorrow.io key test.
+- Saving settings to a file.
+
+To build it yourself:
+
+```bash
+python3 cyd/firmware/tools/package_firmware.py cyd/installer/firmware
+python3 cyd/installer/tools/build_standalone.py
+```
+
 ### Do I have to enter Wi-Fi and location in the installer?
 
 No, but it's the quickest way. Both can be set in three places:

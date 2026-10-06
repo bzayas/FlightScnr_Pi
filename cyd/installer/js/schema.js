@@ -13,6 +13,11 @@
 
 export const SCHEMA_VERSION = 1;
 
+// Images, data and firmware are normally files next to the page. The
+// single-file installer (tools/build_standalone.py) embeds them instead,
+// as data: URLs in window.FS_ASSETS under the same relative paths.
+export const asset = (path) => (globalThis.FS_ASSETS && globalThis.FS_ASSETS[path]) || path;
+
 // fscfg partition (partitions.csv): two 8 KB A/B slots, 32-byte header each.
 export const CFG_PARTITION = 0x3d0000;
 export const CFG_SLOT_SIZE = 0x2000;

@@ -10,6 +10,7 @@
 // Location helpers: place search (Open-Meteo geocoding, no key), browser
 // geolocation, IANA -> POSIX time zones, and nearby LiveATC feeds.
 
+import { asset } from './schema.js';
 import { TZ_POSIX } from './tz_posix.js';
 
 export const tzNames = () => Object.keys(TZ_POSIX).sort();
@@ -54,7 +55,7 @@ export function currentPosition() {
 export async function placeName(lat, lon) {
   try {
     const url = `https://api.bigdatacloud.net/data/reverse-geocode-client?latitude=${lat}&longitude=${lon}&localityLanguage=en`;
-    const res = await fetch(url);
+    const res = await fetch(url, { signal: AbortSignal.timeout(5000) });
     if (!res.ok) return '';
     const d = await res.json();
     return d.city || d.locality || d.principalSubdivision || '';
@@ -75,7 +76,7 @@ export function distanceKm(lat1, lon1, lat2, lon2) {
 let atcCache = null;
 export async function atcAirports(base = 'data/atc_feeds.json') {
   if (!atcCache)
-    atcCache = fetch(base)
+    atcCache = fetch(asset(base))
       .then((r) => (r.ok ? r.json() : { airports: [] }))
       .then((d) => d.airports || [])
       .catch(() => []);
