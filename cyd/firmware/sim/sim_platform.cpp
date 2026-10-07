@@ -58,6 +58,14 @@ void plat_start_setup_ap() {}
 void plat_refresh_data() {}
 const char* plat_device_name() { return "FlightScnr-1A2B"; }
 uint32_t plat_free_heap() { return 96 * 1024; }
+#include <malloc.h>
+/* Host heap use between marks (64-bit: LVGL objects run ~1.5-2x ESP32 size). */
+void plat_mem_mark(const char* stage) {
+  static size_t last;
+  size_t now = mallinfo2().uordblks;
+  if (getenv("FS_SIM_MEM")) printf("[mem] %-10s +%7zd bytes (total %zu)\n", stage, (ssize_t)(now - last), now);
+  last = now;
+}
 uint32_t plat_min_free_heap() { return 61 * 1024; }
 
 /* ---- audio stubs --------------------------------------------------------- */

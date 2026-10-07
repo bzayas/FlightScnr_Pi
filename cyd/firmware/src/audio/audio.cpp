@@ -40,7 +40,8 @@
 #define BLOCK 512 /* frames per mix block (~11.6 ms) */
 #define STREAM_BUF 4096
 
-bool g_bt_mem_kept; /* set in main from btInUse() */
+bool g_bt_mem_kept;  /* set in main from btInUse() */
+bool g_bt_mem_short; /* Bluetooth wanted, but its RAM was given back to keep Wi-Fi alive */
 
 /* ------------------------------------------------------------------------ */
 /* MP3 source with linear-interpolation resampling to 44.1 kHz stereo        */
@@ -521,7 +522,7 @@ void audio_get_status(AudioStatus* s) {
   memset(s, 0, sizeof(*s));
   s->out = g_cfg.audio_out;
   if (g_cfg.audio_out == AUDIO_BLUETOOTH && !g_bt_mem_kept)
-    s->bt_state = BT_NEEDS_REBOOT;
+    s->bt_state = g_bt_mem_short ? BT_FAILED : BT_NEEDS_REBOOT;
   else
     s->bt_state = bt_running() ? bt_state() : BT_OFF;
   if (bt_running()) bt_peer_name(s->bt_peer, sizeof(s->bt_peer));

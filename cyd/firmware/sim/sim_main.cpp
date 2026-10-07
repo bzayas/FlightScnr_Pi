@@ -365,7 +365,9 @@ int main(int argc, char** argv) {
 
   load_mock(g_sim_epoch);
   load_routes();
+  plat_mem_mark("before ui");
   ui_init(W, H);
+  plat_mem_mark("ui done");
   run(700);
   shot("01_disclaimer");
   tap_label("ACCEPT");

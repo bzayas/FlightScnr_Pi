@@ -44,7 +44,7 @@ static const char* state_text(const AudioStatus& as) {
     case BT_STREAMING:
       snprintf(buf, sizeof(buf), "Connected to %s", as.bt_peer);
       return buf;
-    case BT_FAILED: return "Bluetooth failed to start (low memory).";
+    case BT_FAILED: return "Not enough memory for Bluetooth audio and Wi-Fi together. Using the speaker.";
     default: return "Bluetooth is off.";
   }
 }

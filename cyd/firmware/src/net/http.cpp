@@ -23,9 +23,28 @@
  * request rather than fragmenting the heap the UI and audio depend on. */
 static const uint32_t TLS_MIN_BLOCK = 38000;
 
+/* Public, keyless feeds that also answer over plain HTTP. When memory is too
+ * tight for TLS (e.g. Bluetooth audio is on), these still work. Never add a
+ * host that takes an API key or anything private. */
+static const char* const PLAIN_OK[] = {"api.adsb.lol/", "api.open-meteo.com/"};
+
 int http_get(const char* url, HttpBodyFn fn, void* ctx, uint32_t timeout_ms) {
   bool https = strncmp(url, "https://", 8) == 0;
-  if (https && heap_caps_get_largest_free_block(MALLOC_CAP_8BIT) < TLS_MIN_BLOCK) return HTTP_ERR_LOW_MEMORY;
+  char plain_url[320];
+  if (https && heap_caps_get_largest_free_block(MALLOC_CAP_8BIT) < TLS_MIN_BLOCK) {
+    bool ok = false;
+    for (const char* h : PLAIN_OK)
+      if (strncmp(url + 8, h, strlen(h)) == 0) ok = true;
+    if (!ok || strlen(url) >= sizeof(plain_url)) return HTTP_ERR_LOW_MEMORY;
+    snprintf(plain_url, sizeof(plain_url), "http://%s", url + 8);
+    url = plain_url;
+    https = false;
+    static bool told;
+    if (!told) {
+      told = true;
+      Serial.println("[http] low memory: using plain HTTP for public feeds (adsb.lol, Open-Meteo)");
+    }
+  }
 
   WiFiClient plain;
   WiFiClientSecure tls;

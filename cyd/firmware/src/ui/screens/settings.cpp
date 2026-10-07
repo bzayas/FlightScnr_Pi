@@ -80,7 +80,8 @@ void settings_refresh() {
   AudioStatus as;
   audio_get_status(&as);
   const char* bt = as.bt_state == BT_NEEDS_REBOOT ? "Restart needed"
-                   : as.bt_state >= BT_CONNECTED ? as.bt_peer
+                   : as.bt_state == BT_FAILED ? "Unavailable (memory)"
+                   : (as.bt_state == BT_CONNECTED || as.bt_state == BT_STREAMING) ? as.bt_peer
                    : g_cfg.bt_name[0] ? g_cfg.bt_name
                                       : "Not paired";
   set_value(s_bt_row, bt);
@@ -110,6 +111,15 @@ void settings_refresh() {
   else
     snprintf(buf, sizeof(buf), "\xE2\x80\x94");
   set_value(s_addr_row, buf);
+}
+
+void settings_release() {
+  s_page = nullptr;
+  s_theme_seg = s_bright_day = s_bright_night = s_layout_row = s_orient_row = nullptr;
+  s_range_row = s_sweep_sw = s_labels_row = s_lines_row = s_pcolor_row = s_rwy_sw = nullptr;
+  s_out_row = s_bt_row = s_vol = s_chime_sw = s_alerts_sw = s_quiet_sw = s_atc_row = nullptr;
+  s_temp_seg = s_dist_seg = s_alt_seg = s_speed_row = s_24h_sw = nullptr;
+  s_wifi_row = s_addr_row = nullptr;
 }
 
 /* ---- handlers ------------------------------------------------------------ */

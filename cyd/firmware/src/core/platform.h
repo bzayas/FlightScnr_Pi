@@ -66,3 +66,5 @@ void plat_refresh_data();
 const char* plat_device_name(); /* e.g. FlightScnr-1A2B */
 uint32_t plat_free_heap();
 uint32_t plat_min_free_heap();
+/* Log free memory after a start-up stage (boot diagnostics). */
+void plat_mem_mark(const char* stage);

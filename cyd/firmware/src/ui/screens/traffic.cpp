@@ -130,9 +130,17 @@ lv_obj_t* traffic_create(lv_obj_t* parent) {
     lv_obj_add_event_cb(r, row_event, LV_EVENT_SHORT_CLICKED, nullptr);
     s_rows[i] = r;
   }
+  s_gen = s_theme = 0;
   s_empty = w_label(s_page, "No aircraft in range right now.", &fs_text_16, &ST_TEXT2);
   lv_obj_set_style_pad_top(s_empty, 20, 0);
   return s_page;
+}
+
+void traffic_release() {
+  s_page = s_header = s_card = s_empty = nullptr;
+  memset(s_rows, 0, sizeof(s_rows));
+  s_n = 0;
+  s_gen = s_theme = 0; /* rebuild shows fresh data straight away */
 }
 
 void traffic_tick() {

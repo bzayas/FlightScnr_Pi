@@ -31,8 +31,10 @@ lv_obj_t* sheet_body(lv_obj_t* sheet);
 lv_obj_t* sky_create(lv_obj_t* parent);
 void sky_tick();
 lv_obj_t* traffic_create(lv_obj_t* parent);
+void traffic_release(); /* page objects are about to be deleted */
 void traffic_tick();
 lv_obj_t* settings_create(lv_obj_t* parent);
+void settings_release(); /* page objects are about to be deleted */
 void settings_refresh();
 void detail_open(uint32_t icao);
 void detail_tick();

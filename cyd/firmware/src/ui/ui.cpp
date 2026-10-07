@@ -49,9 +49,53 @@ static char s_auto_tz[24];
 /* Navigation                                                                */
 /* ------------------------------------------------------------------------ */
 
+/* Traffic and Settings are built on demand and freed when you leave them:
+ * Settings alone is ~55 KB of LVGL objects on the device, and with Bluetooth
+ * audio reserving its RAM, building everything at boot left too little for
+ * Wi-Fi to start. Sky and the face are always present. */
+static bool s_built[PAGE_COUNT] = {true, true, false, false};
+
+static void page_build(uint8_t pg) {
+  if (pg >= PAGE_COUNT || s_built[pg] || !s_tiles[pg]) return;
+  if (pg == PAGE_TRAFFIC)
+    traffic_create(s_tiles[pg]);
+  else if (pg == PAGE_SETTINGS)
+    settings_create(s_tiles[pg]);
+  else
+    return;
+  s_built[pg] = true;
+  plat_mem_mark(pg == PAGE_TRAFFIC ? "+traffic" : "+settings");
+}
+
+static void release_cb(void*) {
+  uint8_t cur = nav_current();
+  static const uint8_t LAZY[] = {PAGE_TRAFFIC, PAGE_SETTINGS};
+  for (uint8_t pg : LAZY) {
+    if (pg == cur || !s_built[pg]) continue;
+    if (pg == PAGE_TRAFFIC)
+      traffic_release();
+    else
+      settings_release();
+    lv_obj_clean(s_tiles[pg]);
+    s_built[pg] = false;
+  }
+}
+
+static void tv_scroll_begin(lv_event_t*) {
+  /* A finger swipe: build the neighbours before its first frame is drawn.
+   * (Programmatic moves, like showing the face at boot, have no indev and
+   * build their own target in nav_goto.) */
+  if (!lv_indev_get_act()) return;
+  uint8_t cur = nav_current();
+  if (cur > 0) page_build(cur - 1);
+  if (cur + 1 < PAGE_COUNT) page_build(cur + 1);
+}
+
 void nav_goto(uint8_t page, bool anim) {
   if (!s_tv || page >= PAGE_COUNT) return;
+  page_build(page);
   lv_obj_set_tile_id(s_tv, page, 0, anim ? LV_ANIM_ON : LV_ANIM_OFF);
+  if (!anim) lv_async_call(release_cb, nullptr);
 }
 
 uint8_t nav_current() {
@@ -88,6 +132,7 @@ static void update_dots() {
 
 static void tv_event(lv_event_t*) {
   update_dots();
+  lv_async_call(release_cb, nullptr); /* settled: free the pages we left */
   if (nav_current() == PAGE_SETTINGS) settings_refresh();
 }
 
@@ -461,11 +506,14 @@ void ui_init(int width, int height) {
   s_tiles[PAGE_SETTINGS] = lv_tileview_add_tile(s_tv, PAGE_SETTINGS, 0, LV_DIR_LEFT);
   for (auto t : s_tiles) lv_obj_set_scrollbar_mode(t, LV_SCROLLBAR_MODE_OFF);
   lv_obj_add_event_cb(s_tv, tv_event, LV_EVENT_VALUE_CHANGED, nullptr);
+  lv_obj_add_event_cb(s_tv, tv_scroll_begin, LV_EVENT_SCROLL_BEGIN, nullptr);
 
+  plat_mem_mark("ui shell");
   sky_create(s_tiles[PAGE_SKY]);
+  plat_mem_mark("sky");
   face_create(s_tiles[PAGE_FACE], width, height);
-  traffic_create(s_tiles[PAGE_TRAFFIC]);
-  settings_create(s_tiles[PAGE_SETTINGS]);
+  plat_mem_mark("face");
+  /* Traffic and Settings: built on demand (page_build). */
   lv_obj_set_tile_id(s_tv, PAGE_FACE, 0, LV_ANIM_OFF);
 
   s_dots = lv_obj_create(lv_layer_top());

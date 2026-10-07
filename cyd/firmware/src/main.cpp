@@ -20,6 +20,7 @@
 
 #include <Arduino.h>
 #include <Preferences.h>
+#include <esp_bt.h>
 #include <esp_system.h>
 #include <lvgl.h>
 #include <nvs_flash.h>
@@ -36,6 +37,13 @@
 #include "ui/ui.h"
 
 extern bool g_bt_mem_kept;
+extern bool g_bt_mem_short;
+
+/* Bluetooth audio needs its controller RAM reserved from boot, plus Bluedroid
+ * (~40 KB) and Wi-Fi (~50 KB) from the heap once the UI exists. Below this,
+ * keeping Bluetooth would crash Wi-Fi start-up, so it's given up for the
+ * session instead (the speaker is used, and the UI says why). */
+static const uint32_t BT_MIN_HEAP_AFTER_UI = 100 * 1024;
 
 /* LVGL layout + our renderers nest deeper than Arduino's default 8 KB. */
 SET_LOOP_TASK_STACK_SIZE(16 * 1024);
@@ -83,8 +91,10 @@ static void apply_patch(const char* json) {
     if (!cfg_apply_json(g_cfg, json, strlen(json), true)) return;
   }
   bool wifi_changed = strcmp(before.wifi_ssid, g_cfg.wifi_ssid) || strcmp(before.wifi_pass, g_cfg.wifi_pass);
+  /* Switching to Bluetooth needs a restart so its RAM is reserved at boot.
+   * Only on the switch itself: any other change must not restart. */
   bool needs_reboot = before.rotation != g_cfg.rotation || before.spi80 != g_cfg.spi80 ||
-                      (g_cfg.audio_out == AUDIO_BLUETOOTH && !g_bt_mem_kept);
+                      (before.audio_out != AUDIO_BLUETOOTH && g_cfg.audio_out == AUDIO_BLUETOOTH && !g_bt_mem_kept);
   uint32_t mask = diff_mask(before, g_cfg);
   if (mask & UI_CHANGED_LOCATION) plat_apply_timezone(g_cfg.tz_posix);
   if (before.invert != g_cfg.invert) plat_apply_panel_settings();
@@ -150,6 +160,8 @@ void setup() {
   uint32_t flags = 0;
   bool loaded = config_store_load(g_cfg, &flags);
   g_bt_mem_kept = config_store_peek_bluetooth();
+  /* A2DP is Classic Bluetooth only: give the BLE controller's RAM back now. */
+  if (g_bt_mem_kept) esp_bt_controller_mem_release(ESP_BT_MODE_BLE);
   Serial.printf("[sys] settings %s%s, bluetooth %s, heap %u\n", loaded ? "loaded" : "defaults",
                 (flags & FSCFG_FLAG_INSTALLER) ? " (from installer)" : "", g_bt_mem_kept ? "on" : "off",
                 (unsigned)plat_free_heap());
@@ -160,6 +172,14 @@ void setup() {
   Serial.printf("[boot] display ok, heap %u\n", (unsigned)plat_free_heap());
   ui_init(display_width(), display_height());
   Serial.printf("[boot] ui ok, heap %u\n", (unsigned)plat_free_heap());
+  if (g_bt_mem_kept && plat_free_heap() < BT_MIN_HEAP_AFTER_UI) {
+    esp_bt_controller_mem_release(ESP_BT_MODE_BTDM); /* its RAM joins the heap */
+    g_bt_mem_kept = false;
+    g_bt_mem_short = true;
+    Serial.printf("[boot] not enough memory for Bluetooth audio and Wi-Fi together: Bluetooth off, heap now %u\n",
+                  (unsigned)plat_free_heap());
+    ui_toast("Bluetooth audio is off: not enough memory");
+  }
   audio_init();
   Serial.printf("[boot] audio ok, heap %u\n", (unsigned)plat_free_heap());
   net_init();

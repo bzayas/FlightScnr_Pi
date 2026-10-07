@@ -111,4 +111,8 @@ const char* plat_device_name() {
 }
 
 uint32_t plat_free_heap() { return heap_caps_get_free_size(MALLOC_CAP_8BIT); }
+void plat_mem_mark(const char* stage) {
+  Serial.printf("[mem] %-10s heap %6u, largest block %6u\n", stage, (unsigned)heap_caps_get_free_size(MALLOC_CAP_8BIT),
+                (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
+}
 uint32_t plat_min_free_heap() { return heap_caps_get_minimum_free_size(MALLOC_CAP_8BIT); }
