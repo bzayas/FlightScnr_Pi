@@ -34,7 +34,10 @@
 #include "data/geo.h"
 #include "data/model.h"
 #include "data/aircraft_db.h"
+#include "ui/complications.h"
 #include "ui/face.h"
+#include "ui/fx.h"
+#include "ui/glyphs.h"
 #include "ui/layouts.h"
 #include "ui/nav.h"
 #include "ui/radar.h"
@@ -421,12 +424,249 @@ static void load_routes() {
   model_store_aircraft(a);
 }
 
+/* ------------------------------------------------------------------------ */
+/* --gallery: every widget at every slot size the layouts use, and every    */
+/* glyph at several sizes, on plain pages for pixel-level design review.    */
+/* g_cells.tsv lists each cell, so tools can measure where the ink sits.    */
+/* ------------------------------------------------------------------------ */
+
+struct GCell {
+  uint8_t kind; /* 0 widget, 1 glyph */
+  uint8_t comp, family, corner, glyph, cond;
+  bool night;
+  float angle, phase;
+  lv_area_t a;
+};
+static GCell s_gcells[1200];
+static int s_ngcells;
+static bool s_guides;
+static FILE* s_gtsv;
+
+static const char* const GLYPH_NAMES[] = {"none", "weather", "sun", "moon", "sunrise", "sunset", "wind", "drop",
+                                          "plane", "quake", "speaker", "thermo", "uv", "daylight", "radar"};
+static const char* const FAMILY_KEYS[] = {"inline", "corner", "circular", "rect", "large"};
+
+static void gallery_draw(lv_event_t* e) {
+  lv_draw_ctx_t* dc = lv_event_get_draw_ctx(e);
+  const Palette& p = pal();
+  Fx f;
+  if (!fx_begin(dc, f)) return;
+  for (int i = 0; i < s_ngcells; i++) {
+    const GCell& c = s_gcells[i];
+    if (!_lv_area_is_on(&c.a, dc->clip_area)) continue;
+    if (c.kind == 0) {
+      comp_draw_preview(dc, c.comp, c.family, c.a, c.corner);
+    } else {
+      GlyphArgs ga;
+      ga.cond = c.cond;
+      ga.night = c.night;
+      ga.angle = c.angle;
+      ga.phase = c.phase;
+      ga.tint = p.accent;
+      ga.bg = p.bg;
+      float S = (float)(c.a.x2 - c.a.x1 + 1);
+      glyph_draw(f, c.glyph, c.a.x1 + S / 2.0f, c.a.y1 + S / 2.0f, S, ga);
+    }
+    if (s_guides) { /* slot outline and centre lines */
+      lv_color_t g = color_rgb(255, 0, 255);
+      float cx = (c.a.x1 + c.a.x2 + 1) / 2.0f, cy = (c.a.y1 + c.a.y2 + 1) / 2.0f;
+      fx_capsule(f, c.a.x1, c.a.y1, c.a.x2 + 1, c.a.y1, 0.3f, g, 160);
+      fx_capsule(f, c.a.x1, c.a.y2 + 1, c.a.x2 + 1, c.a.y2 + 1, 0.3f, g, 160);
+      fx_capsule(f, c.a.x1, c.a.y1, c.a.x1, c.a.y2 + 1, 0.3f, g, 160);
+      fx_capsule(f, c.a.x2 + 1, c.a.y1, c.a.x2 + 1, c.a.y2 + 1, 0.3f, g, 160);
+      fx_capsule(f, cx, c.a.y1, cx, c.a.y2 + 1, 0.3f, g, 90);
+      fx_capsule(f, c.a.x1, cy, c.a.x2 + 1, cy, 0.3f, g, 90);
+    }
+  }
+}
+
+struct GSize {
+  int16_t w, h;
+  uint8_t corner;
+};
+
+/* Distinct (size, corner) slots per family over every layout, both screen
+ * sizes and both orientations. */
+static int gallery_sizes(uint8_t family, GSize* out, int max) {
+  int n = 0;
+  for (int compact = 1; compact >= 0; compact--) {
+    layouts_set_compact(compact);
+    for (int oc = 0; oc < 2; oc++)
+      for (int li = 0; li < LAYOUT_COUNT; li++) {
+        const LayoutDef& L = layout_get(oc, li);
+        for (int k = 0; k < L.nslots; k++) {
+          const SlotDef& sd = L.slots[k];
+          if (sd.family != family) continue;
+          uint8_t corner = family == FAM_CORNER ? sd.corner : 0;
+          bool seen = false;
+          for (int j = 0; j < n; j++) seen |= out[j].w == sd.w && out[j].h == sd.h && out[j].corner == corner;
+          if (!seen && n < max) out[n++] = {sd.w, sd.h, corner};
+        }
+      }
+  }
+  return n;
+}
+
+static int gallery_widget_page(uint8_t family, int* pw, int* ph) {
+  GSize sz[32];
+  int ns = gallery_sizes(family, sz, 32);
+  const int gap = 14, left = 8, top = 8;
+  int x = left, maxh = 0;
+  for (int j = 0; j < ns; j++) maxh = LV_MAX(maxh, sz[j].h);
+  s_ngcells = 0;
+  for (int j = 0; j < ns; j++) {
+    for (int c = 1; c < COMP_COUNT; c++) {
+      GCell& g = s_gcells[s_ngcells++];
+      memset(&g, 0, sizeof(g));
+      g.comp = (uint8_t)c;
+      g.family = family;
+      g.corner = sz[j].corner;
+      int y = top + (c - 1) * (maxh + gap);
+      g.a = {(lv_coord_t)x, (lv_coord_t)y, (lv_coord_t)(x + sz[j].w - 1), (lv_coord_t)(y + sz[j].h - 1)};
+    }
+    x += sz[j].w + gap;
+  }
+  *pw = x - gap + left;
+  *ph = top + (COMP_COUNT - 1) * (maxh + gap) - gap + top;
+  return s_ngcells;
+}
+
+static const int GLYPH_SIZES[] = {15, 22, 32, 48, 64};
+
+static int gallery_glyph_page(int* pw, int* ph) {
+  const int gap = 12, left = 8, top = 8, nsz = sizeof(GLYPH_SIZES) / sizeof(GLYPH_SIZES[0]);
+  s_ngcells = 0;
+  int row = 0, y = top;
+  auto add_row = [&](uint8_t glyph, uint8_t cond, bool night, float angle, float phase) {
+    int x = left;
+    for (int k = 0; k < nsz; k++) {
+      GCell& g = s_gcells[s_ngcells++];
+      memset(&g, 0, sizeof(g));
+      g.kind = 1;
+      g.glyph = glyph;
+      g.cond = cond;
+      g.night = night;
+      g.angle = angle;
+      g.phase = phase;
+      int S = GLYPH_SIZES[k];
+      g.a = {(lv_coord_t)x, (lv_coord_t)y, (lv_coord_t)(x + S - 1), (lv_coord_t)(y + S - 1)};
+      x += S + gap;
+    }
+    *pw = LV_MAX(*pw, x - gap + left);
+    y += GLYPH_SIZES[nsz - 1] + gap;
+    row++;
+  };
+  *pw = 0;
+  for (int cond = 1; cond < WXC_COUNT; cond++) add_row(GLYPH_WEATHER, (uint8_t)cond, false, 0, 0);
+  add_row(GLYPH_WEATHER, WXC_CLEAR, true, 0, 0);
+  add_row(GLYPH_WEATHER, WXC_PARTLY_CLOUDY, true, 0, 0);
+  for (int gl = GLYPH_SUN; gl <= GLYPH_RADAR; gl++) {
+    if (gl == GLYPH_WEATHER || gl == GLYPH_SPEAKER) continue;
+    add_row((uint8_t)gl, 0, false, gl == GLYPH_WIND ? 225.0f : (gl == GLYPH_PLANE ? 45.0f : 0.0f), 0.30f);
+  }
+  add_row(GLYPH_PLANE, 0, false, 0.0f, 0); /* the plane at 0 and 90 degrees, for centring */
+  add_row(GLYPH_PLANE, 0, false, 90.0f, 0);
+  *ph = y - gap + top;
+  return s_ngcells;
+}
+
+static void gallery_tsv(const char* page) {
+  for (int i = 0; i < s_ngcells; i++) {
+    const GCell& c = s_gcells[i];
+    fprintf(s_gtsv, "%s\t%s\t%s\t%s\t%d\t%d\t%d\t%d\t%d\t%d\n", page, c.kind ? "glyph" : "widget",
+            c.kind ? GLYPH_NAMES[c.glyph] : comp_display_name(c.comp), c.kind ? "" : FAMILY_KEYS[c.family],
+            c.kind ? c.cond * 2 + c.night : c.corner, (int)c.a.x1, (int)c.a.y1, (int)(c.a.x2 - c.a.x1 + 1),
+            (int)(c.a.y2 - c.a.y1 + 1), 0);
+  }
+}
+
+static int run_gallery() {
+  /* the largest page decides the canvas */
+  int gw = 0, gh = 0;
+  for (int fam = 0; fam < FAM_COUNT; fam++) {
+    int pw, ph;
+    gallery_widget_page((uint8_t)fam, &pw, &ph);
+    gw = LV_MAX(gw, pw);
+    gh = LV_MAX(gh, ph);
+  }
+  {
+    int pw, ph;
+    gallery_glyph_page(&pw, &ph);
+    gw = LV_MAX(gw, pw);
+    gh = LV_MAX(gh, ph);
+  }
+  W = gw;
+  H = gh;
+  s_prefix = "g";
+  lv_init();
+  s_fb = (uint16_t*)calloc((size_t)W * H, 2);
+  s_buf1 = (lv_color_t*)malloc(sizeof(lv_color_t) * W * 32);
+  s_buf2 = (lv_color_t*)malloc(sizeof(lv_color_t) * W * 32);
+  static lv_disp_draw_buf_t db;
+  lv_disp_draw_buf_init(&db, s_buf1, s_buf2, (uint32_t)W * 32);
+  static lv_disp_drv_t dd;
+  lv_disp_drv_init(&dd);
+  dd.hor_res = (lv_coord_t)W;
+  dd.ver_res = (lv_coord_t)H;
+  dd.flush_cb = flush_cb;
+  dd.draw_buf = &db;
+  lv_disp_drv_register(&dd);
+  load_mock(g_sim_epoch);
+  load_routes();
+  theme_init();
+  comp_refresh_context();
+  lv_obj_t* scr = lv_obj_create(nullptr);
+  lv_obj_remove_style_all(scr);
+  lv_obj_set_size(scr, W, H);
+  lv_obj_t* canvas = lv_obj_create(scr);
+  lv_obj_remove_style_all(canvas);
+  lv_obj_set_size(canvas, W, H);
+  lv_obj_add_event_cb(canvas, gallery_draw, LV_EVENT_DRAW_MAIN, nullptr);
+  lv_scr_load(scr);
+  char path[256];
+  snprintf(path, sizeof(path), "%s/g_cells.tsv", s_out);
+  s_gtsv = fopen(path, "w");
+  if (!s_gtsv) {
+    fprintf(stderr, "  can't write %s\n", path);
+    return 1;
+  }
+  fprintf(s_gtsv, "page\tkind\tname\tfamily\tvariant\tx\ty\tw\th\t_\n");
+  for (int theme = 0; theme < 2; theme++) {
+    g_cfg.theme_mode = theme ? THEME_LIGHT : THEME_DARK;
+    theme_init();
+    lv_obj_set_style_bg_color(scr, pal().bg, 0);
+    lv_obj_set_style_bg_opa(scr, LV_OPA_COVER, 0);
+    for (int guides = 0; guides < 2; guides++) {
+      s_guides = guides;
+      for (int fam = 0; fam <= FAM_COUNT; fam++) {
+        int pw, ph;
+        char name[64];
+        if (fam < FAM_COUNT) {
+          gallery_widget_page((uint8_t)fam, &pw, &ph);
+          snprintf(name, sizeof(name), "%s_%s%s", theme ? "day" : "night", FAMILY_KEYS[fam], guides ? "_guides" : "");
+        } else {
+          gallery_glyph_page(&pw, &ph);
+          snprintf(name, sizeof(name), "%s_glyphs%s", theme ? "day" : "night", guides ? "_guides" : "");
+        }
+        if (!theme && !guides) gallery_tsv(fam < FAM_COUNT ? FAMILY_KEYS[fam] : "glyphs");
+        lv_obj_invalidate(scr);
+        lv_refr_now(nullptr);
+        shot(name);
+      }
+    }
+  }
+  fclose(s_gtsv);
+  if (s_shot_fails) printf("%d screenshots could not be written to %s\n", s_shot_fails, s_out);
+  return s_shot_fails ? 1 : 0;
+}
+
 int main(int argc, char** argv) {
-  bool landscape = false, small = false;
+  bool landscape = false, small = false, gallery = false;
   for (int i = 1; i < argc; i++) {
     if (!strcmp(argv[i], "--landscape")) landscape = true;
     if (!strcmp(argv[i], "--small")) small = true; /* 2.8" CYD, 240x320 */
     if (!strcmp(argv[i], "--out") && i + 1 < argc) s_out = argv[++i];
+    if (!strcmp(argv[i], "--gallery")) gallery = true;
   }
   mkdir(s_out, 0755);
   if (small) {
@@ -455,6 +695,7 @@ int main(int argc, char** argv) {
 
   /* 2026-10-06 21:40 PDT (night) */
   g_sim_epoch = utc_from_civil(2026, 10, 7, 4, 40, 0);
+  if (gallery) return run_gallery();
 
   lv_init();
   s_fb = (uint16_t*)calloc((size_t)W * H, 2);
@@ -530,6 +771,18 @@ int main(int argc, char** argv) {
   nav_goto(PAGE_SKY, false);
   run(600);
   shot("08_sky");
+  {
+    lv_obj_t* tv = lv_obj_get_child(lv_scr_act(), 0);
+    lv_obj_t* page = lv_obj_get_child(lv_obj_get_child(tv, PAGE_SKY), 0);
+    lv_obj_scroll_to_y(page, H * 9 / 10, LV_ANIM_OFF);
+    run(300);
+    shot("08b_sky_sun");
+    lv_obj_scroll_to_y(page, LV_COORD_MAX, LV_ANIM_OFF);
+    run(300);
+    shot("08c_sky_end");
+    lv_obj_scroll_to_y(page, 0, LV_ANIM_OFF);
+    run(200);
+  }
   nav_goto(PAGE_TRAFFIC, false);
   run(600);
   shot("09_traffic");

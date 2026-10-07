@@ -194,13 +194,17 @@ void comp_build(uint8_t comp, uint8_t family, CompData& d) {
       fmt_clock_hm(&C.lt, hm, sizeof(hm), ap, sizeof(ap));
       SET(value, hm);
       SET(unit, ap);
-      fmt_strftime(buf, sizeof(buf), "%A, %B %-d", &C.lt);
+      d.ampm = true;
+      /* the weekday is the caption, so cards say only the date */
+      fmt_strftime(buf, sizeof(buf), family == FAM_INLINE ? "%A, %B %-d" : "%B %-d", &C.lt);
       SET(line2, buf);
       strftime(buf, sizeof(buf), "%a", &C.lt);
       for (char* c = buf; *c; c++) *c = (char)toupper((unsigned char)*c);
       SET(title, buf);
-      fmt_strftime(buf, sizeof(buf), "%b %-d", &C.lt);
-      SET(line3, buf);
+      if (family == FAM_LARGE) {
+        fmt_strftime(buf, sizeof(buf), "%b %-d", &C.lt);
+        SET(line3, buf);
+      }
       d.custom = family == FAM_LARGE ? CUSTOM_BIGTIME : (family == FAM_CIRCULAR ? CUSTOM_ANALOG : CUSTOM_NONE);
       break;
     }
@@ -213,17 +217,23 @@ void comp_build(uint8_t comp, uint8_t family, CompData& d) {
       strftime(buf, sizeof(buf), "%a", &C.lt);
       for (char* c = buf; *c; c++) *c = (char)toupper((unsigned char)*c);
       SET(title, buf);
-      snprintf(buf, sizeof(buf), "%d", C.lt.tm_mday);
-      SET(value, buf);
-      fmt_strftime(buf, sizeof(buf), family == FAM_INLINE ? "%A, %B %-d" : "%B %Y", &C.lt);
-      SET(line2, buf);
-      strftime(buf, sizeof(buf), "%A", &C.lt);
-      SET(line3, buf);
+      if (family == FAM_INLINE) { /* "Tuesday  October 6" */
+        strftime(buf, sizeof(buf), "%A", &C.lt);
+        SET(value, buf);
+        fmt_strftime(buf, sizeof(buf), "%B %-d", &C.lt);
+        SET(line2, buf);
+      } else {
+        snprintf(buf, sizeof(buf), "%d", C.lt.tm_mday);
+        SET(value, buf);
+        fmt_strftime(buf, sizeof(buf), "%B %Y", &C.lt);
+        SET(line2, buf);
+      }
       d.custom = family == FAM_CIRCULAR ? CUSTOM_CALENDAR : CUSTOM_NONE;
       break;
     }
     case COMP_WEATHER: {
       d.glyph = GLYPH_WEATHER;
+      d.tint = p.blue;
       d.cond = C.wx_ok ? C.wx.cond : WXC_UNKNOWN;
       d.night = C.sun_elev < SUN_HORIZON_DEG;
       SET(title, "WEATHER");
@@ -265,6 +275,7 @@ void comp_build(uint8_t comp, uint8_t family, CompData& d) {
     }
     case COMP_FORECAST: {
       d.glyph = GLYPH_WEATHER;
+      d.tint = p.blue;
       d.night = C.sun_elev < SUN_HORIZON_DEG;
       d.custom = (family == FAM_RECT || family == FAM_LARGE) ? CUSTOM_HOURLY : CUSTOM_NONE;
       SET(title, "NEXT HOURS");
@@ -323,6 +334,7 @@ void comp_build(uint8_t comp, uint8_t family, CompData& d) {
         fmt_clock_hm(&t, hm, sizeof(hm), ap, sizeof(ap));
         SET(value, hm);
         SET(unit, ap);
+        d.ampm = true;
         char dur[16];
         fmt_duration((long)(when - C.now), dur, sizeof(dur));
         snprintf(d.line2, sizeof(d.line2), "in %s", dur);
@@ -332,7 +344,6 @@ void comp_build(uint8_t comp, uint8_t family, CompData& d) {
         fmt_clock(C.sun.sunrise, r, sizeof(r));
         fmt_clock(C.sun.sunset, s, sizeof(s));
         snprintf(d.line3, sizeof(d.line3), "\xE2\x86\x91 %s   \xE2\x86\x93 %s", r, s);
-        if (family == FAM_INLINE) snprintf(d.line2, sizeof(d.line2), "%s", d.line3);
         d.custom = (family == FAM_RECT || family == FAM_LARGE || family == FAM_CIRCULAR) ? CUSTOM_SOLAR : CUSTOM_NONE;
       }
       break;
@@ -350,6 +361,7 @@ void comp_build(uint8_t comp, uint8_t family, CompData& d) {
       if (C.now < C.sun.sunrise || C.now > C.sun.sunset) {
         d.gauge = 0;
         fmt_duration(total, d.value, sizeof(d.value));
+        snprintf(d.vshort, sizeof(d.vshort), "%ldh", total / 3600);
         SET(line2, "of daylight today");
         time_t w;
         bool r;
@@ -361,6 +373,7 @@ void comp_build(uint8_t comp, uint8_t family, CompData& d) {
         long left = (long)(C.sun.sunset - C.now);
         d.gauge = 1.0f - (float)left / (float)total;
         fmt_duration(left, d.value, sizeof(d.value));
+        snprintf(d.vshort, sizeof(d.vshort), left >= 3600 ? "%ldh" : "%ldm", left >= 3600 ? left / 3600 : left / 60);
         SET(line2, "of daylight left");
         char tot[16];
         fmt_duration(total, tot, sizeof(tot));
@@ -487,6 +500,13 @@ void comp_build(uint8_t comp, uint8_t family, CompData& d) {
         }
       } else if (comp == COMP_HIGHEST) {
         fmt_alt(f.alt_ft, d.value, sizeof(d.value));
+        size_t n = strlen(d.value); /* "39,000ft" -> "39,000" + "ft" */
+        while (n > 0 && d.value[n - 1] >= 'a' && d.value[n - 1] <= 'z') n--;
+        if (n > 0 && n < strlen(d.value)) {
+          SET(unit, d.value + n);
+          d.value[n] = 0;
+        }
+        fmt_alt_short(f.alt_ft, d.vshort, sizeof(d.vshort));
         snprintf(d.line2, sizeof(d.line2), "%s %s", id, f.type);
         snprintf(d.line3, sizeof(d.line3), "%s away", dist);
       } else {
@@ -594,26 +614,61 @@ static int text_w(const char* s, const lv_font_t* f) {
   return p.x;
 }
 
-static const lv_font_t* const TEXT_FONTS[] = {&fs_text_30, &fs_text_24, &fs_text_20, &fs_text_16, &fs_text_14,
-                                              &fs_text_12};
-static const lv_font_t* const NUM_FONTS[] = {&fs_num_72, &fs_num_56, &fs_num_40, &fs_text_30,
-                                             &fs_text_24, &fs_text_20, &fs_text_16, &fs_text_14};
+/* ---- Typography -----------------------------------------------------------
+ * Text is placed by its ink, not by its line box. LVGL draws a label from the
+ * top of the font's line box, which carries room for ascenders and descenders;
+ * the numeral fonts carry descender room their figures never use, so centring
+ * a line box leaves figures several pixels high. `top` and `base` are the top
+ * of the capitals/figures and the baseline, measured from the line-box top. */
 
-static const lv_font_t* fit_font(const char* s, bool numeric, int max_w, int max_h) {
-  const lv_font_t* const* list = numeric ? NUM_FONTS : TEXT_FONTS;
-  int n = numeric ? (int)(sizeof(NUM_FONTS) / sizeof(NUM_FONTS[0])) : (int)(sizeof(TEXT_FONTS) / sizeof(TEXT_FONTS[0]));
-  for (int i = 0; i < n; i++) {
-    if (list[i]->line_height > max_h) continue;
-    if (text_w(s, list[i]) <= max_w) return list[i];
-  }
-  return &fs_text_12;
+struct Ink {
+  int top, base;
+  int cap() const { return base - top; }
+};
+
+static Ink ink(const lv_font_t* f) {
+  Ink i;
+  i.base = f->line_height - f->base_line;
+  lv_font_glyph_dsc_t g;
+  if (lv_font_get_glyph_dsc(f, &g, '1', 0) && g.box_h) /* Inter's 1 is cap height, flat at both ends */
+    i.top = i.base - (g.box_h + g.ofs_y);
+  else
+    i.top = i.base - f->line_height * 7 / 10;
+  return i;
 }
 
+/* Height of lowercase letters ("mph"), for centring a lowercase-only word. */
+static int x_height(const lv_font_t* f) {
+  lv_font_glyph_dsc_t g;
+  return lv_font_get_glyph_dsc(f, &g, 'x', 0) && g.box_h ? g.box_h : ink(f).cap() * 3 / 4;
+}
+
+static bool has_caps(const char* s) {
+  for (; *s; s++)
+    if ((*s >= 'A' && *s <= 'Z') || (*s >= '0' && *s <= '9')) return true;
+  return false;
+}
+
+/* Width that centres a string: a trailing degree sign hangs outside, as in
+ * Apple's temperatures, so "65°" centres on the 65. */
+static int centre_w(const char* s, const lv_font_t* f, int w) {
+  size_t n = strlen(s);
+  if (n > 2 && (unsigned char)s[n - 2] == 0xC2 && (unsigned char)s[n - 1] == 0xB0) return w - text_w("\xC2\xB0", f);
+  return w;
+}
+
+static int align_x(const char* s, const lv_font_t* f, int x, lv_text_align_t al, int w) {
+  if (al == LV_TEXT_ALIGN_CENTER) return x - (centre_w(s, f, w) + 1) / 2;
+  if (al == LV_TEXT_ALIGN_RIGHT) return x - w;
+  return x;
+}
+
+/* y is the top of the line box. */
 static void txt(lv_draw_ctx_t* dc, const char* s, const lv_font_t* f, lv_color_t c, uint8_t opa, int x, int y,
                 lv_text_align_t al) {
   if (!s || !*s) return;
   int w = text_w(s, f);
-  int x1 = al == LV_TEXT_ALIGN_CENTER ? x - w / 2 : (al == LV_TEXT_ALIGN_RIGHT ? x - w : x);
+  int x1 = align_x(s, f, x, al, w);
   lv_area_t a = {(lv_coord_t)x1, (lv_coord_t)y, (lv_coord_t)(x1 + w), (lv_coord_t)(y + f->line_height)};
   if (!_lv_area_is_on(&a, dc->clip_area)) return;
   lv_draw_label_dsc_t d;
@@ -624,11 +679,18 @@ static void txt(lv_draw_ctx_t* dc, const char* s, const lv_font_t* f, lv_color_t
   lv_draw_label(dc, &d, &a, s, nullptr);
 }
 
-/* Left-aligned text cut to max_w with an ellipsis ("AIR CANAD..." would
+/* Text sitting on a baseline. */
+static void txt_base(lv_draw_ctx_t* dc, const char* s, const lv_font_t* f, lv_color_t c, int x, int base,
+                     lv_text_align_t al) {
+  txt(dc, s, f, c, 255, x, base - ink(f).base, al);
+}
+
+/* Text cut to max_w with an ellipsis, on a baseline ("AIR CANAD…" would
  * otherwise spill out of a narrow slot). */
-static void txt_fit(lv_draw_ctx_t* dc, const char* s, const lv_font_t* f, lv_color_t c, int x, int y, int max_w) {
-  if (!s || !*s) return;
-  if (max_w <= 0 || text_w(s, f) <= max_w) return txt(dc, s, f, c, 255, x, y, LV_TEXT_ALIGN_LEFT);
+static void txt_fit(lv_draw_ctx_t* dc, const char* s, const lv_font_t* f, lv_color_t c, int x, int base, int max_w,
+                    lv_text_align_t al = LV_TEXT_ALIGN_LEFT) {
+  if (!s || !*s || max_w <= 0) return;
+  if (text_w(s, f) <= max_w) return txt_base(dc, s, f, c, x, base, al);
   char buf[72];
   size_t n = strlen(s);
   if (n > sizeof(buf) - 4) n = sizeof(buf) - 4;
@@ -636,16 +698,17 @@ static void txt_fit(lv_draw_ctx_t* dc, const char* s, const lv_font_t* f, lv_col
   buf[n] = 0;
   while (n > 0) {
     do n--; while (n > 0 && ((unsigned char)buf[n] & 0xC0) == 0x80); /* whole UTF-8 characters */
+    while (n > 0 && buf[n - 1] == ' ') n--;                         /* no space before the ellipsis */
     memcpy(buf + n, "\xE2\x80\xA6", 4);
     if (text_w(buf, f) <= max_w) break;
   }
-  txt(dc, buf, f, c, 255, x, y, LV_TEXT_ALIGN_LEFT);
+  txt_base(dc, buf, f, c, x, base, al);
 }
 
-/* Value text with a vertical roll when it changes. */
+/* Value text with a vertical roll when it changes. y is the line-box top. */
 static void value_txt(lv_draw_ctx_t* dc, Slot* s, const char* now_s, const char* prev_s, const lv_font_t* f,
                       lv_color_t c, int x, int y, lv_text_align_t al) {
-  if (!s || s->anim >= 1024 || !prev_s[0] || strcmp(now_s, prev_s) == 0) {
+  if (!s || s->anim >= 1024 || !prev_s || !prev_s[0] || strcmp(now_s, prev_s) == 0) {
     txt(dc, now_s, f, c, LV_OPA_COVER, x, y, al);
     return;
   }
@@ -654,7 +717,7 @@ static void value_txt(lv_draw_ctx_t* dc, Slot* s, const char* now_s, const char*
   int h = f->line_height;
   int wn = text_w(now_s, f), wp = text_w(prev_s, f);
   int w = LV_MAX(wn, wp);
-  int x1 = al == LV_TEXT_ALIGN_CENTER ? x - w / 2 : (al == LV_TEXT_ALIGN_RIGHT ? x - w : x);
+  int x1 = align_x(wn >= wp ? now_s : prev_s, f, x, al, w);
   lv_area_t box = {(lv_coord_t)(x1 - 2), (lv_coord_t)y, (lv_coord_t)(x1 + w + 2), (lv_coord_t)(y + h)};
   lv_area_t clip;
   if (!_lv_area_intersect(&clip, dc->clip_area, &box)) return;
@@ -666,7 +729,7 @@ static void value_txt(lv_draw_ctx_t* dc, Slot* s, const char* now_s, const char*
   for (size_t i = 0; i < ln; i++) ascii &= (unsigned char)now_s[i] < 0x80;
   for (size_t i = 0; i < lp; i++) ascii &= (unsigned char)prev_s[i] < 0x80;
   if (ln == lp && ascii) { /* roll only the characters that changed */
-    int cx = al == LV_TEXT_ALIGN_CENTER ? x - wn / 2 : (al == LV_TEXT_ALIGN_RIGHT ? x - wn : x);
+    int cx = align_x(now_s, f, x, al, wn);
     for (size_t i = 0; i < ln; i++) {
       char a[2] = {now_s[i], 0}, b[2] = {prev_s[i], 0};
       int cw = text_w(a, f);
@@ -683,6 +746,87 @@ static void value_txt(lv_draw_ctx_t* dc, Slot* s, const char* now_s, const char*
     txt(dc, now_s, f, c, (uint8_t)(255 * e), x, (int)(y + shift * (1 - e)), al);
   }
   dc->clip_area = old_clip;
+}
+
+static const lv_font_t* const TEXT_FONTS[] = {&fs_text_30, &fs_text_24, &fs_text_20, &fs_text_16, &fs_text_14,
+                                              &fs_text_12};
+static const lv_font_t* const NUM_FONTS[] = {&fs_num_72,  &fs_num_56,  &fs_num_40,  &fs_text_30, &fs_text_24,
+                                             &fs_text_20, &fs_text_16, &fs_text_14, &fs_text_12};
+
+/* A unit set beside its value, smaller and on the same baseline ("13 mph",
+ * "9:40 PM"). */
+static const lv_font_t* unit_font(const lv_font_t* vf) {
+  int c = ink(vf).cap();
+  return c >= 26 ? &fs_text_20 : c >= 17 ? &fs_text_16 : c >= 11 ? &fs_text_14 : &fs_text_12;
+}
+static int unit_gap(const lv_font_t* vf) { return LV_MAX(2, ink(vf).cap() / 6); }
+
+static int pair_w(const char* v, const lv_font_t* vf, const char* u) {
+  int w = text_w(v, vf);
+  if (u && u[0]) w += unit_gap(vf) + text_w(u, unit_font(vf));
+  return w;
+}
+
+/* The largest font whose figures are at most max_cap tall and whose text
+ * (with its unit) is at most max_w wide; nullptr if none is. */
+static const lv_font_t* fit(const char* v, bool numeric, const char* u, int max_w, int max_cap, int min_cap = 0) {
+  const lv_font_t* const* list = numeric ? NUM_FONTS : TEXT_FONTS;
+  int n = numeric ? (int)(sizeof(NUM_FONTS) / sizeof(NUM_FONTS[0])) : (int)(sizeof(TEXT_FONTS) / sizeof(TEXT_FONTS[0]));
+  for (int i = 0; i < n; i++) {
+    int c = ink(list[i]).cap();
+    if (c > max_cap) continue;
+    if (c < min_cap) break;
+    if (pair_w(v, list[i], u) <= max_w) return list[i];
+  }
+  return nullptr;
+}
+
+/* What a widget shows in a given space: the value with its unit, then without
+ * it, then its short form ("39k" for "39,000ft"); never wider than max_w. */
+struct Shown {
+  const lv_font_t* f;
+  const char* v;
+  const char* u;
+};
+
+static Shown fit_value(const CompData& d, int max_w, int max_cap, int min_cap = 0) {
+  const char* u = d.unit[0] ? d.unit : nullptr;
+  const lv_font_t* f;
+  if ((f = fit(d.value, d.numeric, u, max_w, max_cap, u ? min_cap : 0))) return {f, d.value, u};
+  if (u && (f = fit(d.value, d.numeric, nullptr, max_w, max_cap))) return {f, d.value, nullptr};
+  if (d.vshort[0] && (f = fit(d.vshort, is_numeric(d.vshort), nullptr, max_w, max_cap))) return {f, d.vshort, nullptr};
+  if (d.vshort[0]) return {&fs_text_12, d.vshort, nullptr};
+  return {&fs_text_12, d.value, nullptr};
+}
+
+/* For the circles: the value as large as it can be. A unit is added only if
+ * the value keeps that size, and the short form wins if it's much larger. */
+static Shown fit_bold(const CompData& d, int max_w, int max_cap) {
+  const lv_font_t* fv = fit(d.value, d.numeric, nullptr, max_w, max_cap);
+  const lv_font_t* fs = d.vshort[0] ? fit(d.vshort, is_numeric(d.vshort), nullptr, max_w, max_cap) : nullptr;
+  if (fv && (!fs || ink(fv).cap() * 100 >= ink(fs).cap() * 85 || ink(fv).cap() >= 12)) {
+    if (d.unit[0] && pair_w(d.value, fv, d.unit) <= max_w) return {fv, d.value, d.unit};
+    return {fv, d.value, nullptr};
+  }
+  if (fs) return {fs, d.vshort, nullptr};
+  return {nullptr, d.value, nullptr};
+}
+
+/* Draws a value and its unit on one baseline, aligned as a group; centred
+ * groups without a unit hang a trailing degree sign. */
+static void draw_pair(lv_draw_ctx_t* dc, Slot* s, const CompData& d, const Shown& sh, lv_color_t vc, int x, int base,
+                      lv_text_align_t al) {
+  const Palette& p = pal();
+  int vw = text_w(sh.v, sh.f);
+  int total = pair_w(sh.v, sh.f, sh.u);
+  int x1 = x;
+  if (al == LV_TEXT_ALIGN_CENTER)
+    x1 = x - ((sh.u ? total : centre_w(sh.v, sh.f, vw)) + 1) / 2;
+  else if (al == LV_TEXT_ALIGN_RIGHT)
+    x1 = x - total;
+  const char* prev = (s && sh.v == d.value) ? s->prev.value : "";
+  value_txt(dc, s, sh.v, prev, sh.f, vc, x1, base - ink(sh.f).base, LV_TEXT_ALIGN_LEFT);
+  if (sh.u) txt_base(dc, sh.u, unit_font(sh.f), p.text2, x1 + vw + unit_gap(sh.f), base, LV_TEXT_ALIGN_LEFT);
 }
 
 static void platter_rect(lv_draw_ctx_t* dc, const lv_area_t& a, int radius) {
@@ -760,8 +904,8 @@ static void draw_gauge_arc(Fx& f, float cx, float cy, float r, float hw, float a
   if (!isnan(d.mark)) {
     float mx, my;
     fx_polar(cx, cy, r, a0 + span * d.mark, &mx, &my);
-    fx_disc(f, mx, my, hw + 2.2f, p.platter, 255);
-    fx_disc(f, mx, my, hw + 0.8f, p.text, 255);
+    fx_disc(f, mx, my, hw + 1.6f, p.platter, 255);
+    fx_disc(f, mx, my, hw + 0.4f, p.text, 255);
   }
 }
 
@@ -776,6 +920,9 @@ static GlyphArgs glyph_args(const CompData& d, lv_color_t bg) {
   return a;
 }
 
+/* Glyphs fill about 80% of their box; layouts size them by that ink. */
+static const float GLYPH_INK = 0.8f;
+
 /* ------------------------------------------------------------------------ */
 /* Custom renderers                                                          */
 /* ------------------------------------------------------------------------ */
@@ -783,18 +930,21 @@ static GlyphArgs glyph_args(const CompData& d, lv_color_t bg) {
 static void draw_solar_curve(Fx& f, lv_draw_ctx_t* dc, int x0, int y0, int w, int h, bool labels) {
   const Palette& p = pal();
   if (!C.sun.valid || !C.time_ok) return;
-  float mid = y0 + h * 0.58f;
-  float amp = h * 0.40f;
+  /* With labels, the times sit under the chart, centred on sunrise and sunset. */
+  const lv_font_t* lf = &fs_text_12;
+  int lh = labels ? ink(lf).cap() + 5 : 0;
+  int ch = h - lh;
+  float amp = ch * 0.42f;
+  float mid = y0 + ch * 0.54f; /* the sun rises 1.0 amp above, dips at most 1.0 amp below */
   float peak = fmaxf(20.0f, fabsf(C.sun.noon_elev));
-  /* horizon */
-  fx_capsule(f, (float)x0, mid, (float)(x0 + w), mid, 0.6f, p.text3, 200);
+  fx_capsule(f, (float)x0, mid, (float)(x0 + w), mid, 0.6f, p.text3, 200); /* horizon */
   const int N = 36;
   float px = 0, py = 0;
   for (int i = 0; i <= N; i++) {
     time_t t = C.sun.day_start + (time_t)(86400L * i / N);
     float e = sun_elevation(g_cfg.lat, g_cfg.lon, t);
     float x = x0 + w * (float)i / N;
-    float y = mid - fmaxf(-1.2f, fminf(1.2f, e / peak)) * amp;
+    float y = mid - fmaxf(-1.0f, fminf(1.0f, e / peak)) * amp;
     if (i) {
       bool day = e > 0;
       lv_color_t c = day ? color_mix(p.orange, p.yellow, fminf(1.0f, e / peak)) : p.text3;
@@ -807,7 +957,7 @@ static void draw_solar_curve(Fx& f, lv_draw_ctx_t* dc, int x0, int y0, int w, in
   float tn = (float)(C.now - C.sun.day_start) / 86400.0f;
   if (tn >= 0 && tn <= 1) {
     float x = x0 + w * tn;
-    float y = mid - fmaxf(-1.2f, fminf(1.2f, C.sun_elev / peak)) * amp;
+    float y = mid - fmaxf(-1.0f, fminf(1.0f, C.sun_elev / peak)) * amp;
     bool day = C.sun_elev > 0;
     if (day) fx_glow(f, x, y, 10, p.sun, 120);
     fx_disc(f, x, y, 4.2f, p.platter, 255);
@@ -817,24 +967,39 @@ static void draw_solar_curve(Fx& f, lv_draw_ctx_t* dc, int x0, int y0, int w, in
     char r[16], s[16];
     fmt_clock(C.sun.sunrise, r, sizeof(r));
     fmt_clock(C.sun.sunset, s, sizeof(s));
+    int base = y0 + h;
     float xr = x0 + w * (float)(C.sun.sunrise - C.sun.day_start) / 86400.0f;
     float xs = x0 + w * (float)(C.sun.sunset - C.sun.day_start) / 86400.0f;
-    txt(dc, r, &fs_text_12, p.text2, 255, (int)xr, (int)(mid + 3), LV_TEXT_ALIGN_CENTER);
-    txt(dc, s, &fs_text_12, p.text2, 255, (int)xs, (int)(mid + 3), LV_TEXT_ALIGN_CENTER);
+    /* keep both labels inside the chart */
+    int wr = text_w(r, lf), ws = text_w(s, lf);
+    xr = fmaxf(xr, x0 + wr / 2.0f);
+    xs = fminf(xs, x0 + w - ws / 2.0f);
+    txt_base(dc, r, lf, p.text2, (int)lroundf(xr), base, LV_TEXT_ALIGN_CENTER);
+    txt_base(dc, s, lf, p.text2, (int)lroundf(xs), base, LV_TEXT_ALIGN_CENTER);
   }
 }
 
+/* Hour columns: time, condition, temperature, centred in the box. */
 static void draw_hourly(Fx& f, lv_draw_ctx_t* dc, int x0, int y0, int w, int h) {
   const Palette& p = pal();
   if (!C.wx_ok || !C.wx.hourly_n) return;
-  int cols = w >= 240 ? 5 : 4;
+  int cols = LV_MAX(2, LV_MIN(5, w / 36));
   int stepH = C.wx.hourly_n >= 13 ? 3 : 2;
-  int cw = w / cols;
-  bool tall = h >= 60;
+  float cw = w / (float)cols;
+  const lv_font_t* lf = &fs_text_12;
+  const lv_font_t* tf = h >= 60 ? &fs_text_16 : &fs_text_14;
+  int lcap = ink(lf).cap(), tcap = ink(tf).cap();
+  int gap = h >= 60 ? 6 : 4;
+  float gs = fminf(26.0f, (h - lcap - tcap - 2 * gap) / GLYPH_INK);
+  float block = lcap + gap + gs * GLYPH_INK + gap + tcap;
+  float top = y0 + (h - block) / 2.0f;
+  int lbase = (int)lroundf(top + lcap);
+  float gcy = top + lcap + gap + gs * GLYPH_INK / 2.0f;
+  int tbase = (int)lroundf(top + block);
   for (int i = 0; i < cols; i++) {
     int hi = i * stepH;
     if (hi >= C.wx.hourly_n) break;
-    int cx = x0 + cw * i + cw / 2;
+    int cx = (int)lroundf(x0 + cw * i + cw / 2);
     char lab[12];
     if (i == 0) {
       snprintf(lab, sizeof(lab), "Now");
@@ -846,14 +1011,13 @@ static void draw_hourly(Fx& f, lv_draw_ctx_t* dc, int x0, int y0, int w, int h) 
       else
         snprintf(lab, sizeof(lab), "%d%s", t.tm_hour % 12 ? t.tm_hour % 12 : 12, t.tm_hour < 12 ? "AM" : "PM");
     }
-    txt(dc, lab, &fs_text_12, p.text2, 255, cx, y0, LV_TEXT_ALIGN_CENTER);
-    float gs = tall ? 22.0f : 16.0f;
+    txt_base(dc, lab, lf, p.text2, cx, lbase, LV_TEXT_ALIGN_CENTER);
     time_t ht = C.wx.hourly_start + hi * 3600;
     bool night = C.loc_ok ? sun_elevation(g_cfg.lat, g_cfg.lon, ht) < SUN_HORIZON_DEG : false;
-    glyph_weather(f, C.wx.hourly_cond[hi], night, (float)cx, y0 + 14 + gs / 2, gs, p.platter);
+    glyph_weather(f, C.wx.hourly_cond[hi], night, (float)cx, gcy, gs, p.platter);
     char tv[12];
     fmt_temp(C.wx.hourly_c[hi], tv, sizeof(tv));
-    txt(dc, tv, &fs_text_14, p.text, 255, cx, (int)(y0 + 16 + gs), LV_TEXT_ALIGN_CENTER);
+    txt_base(dc, tv, tf, p.text, cx, tbase, LV_TEXT_ALIGN_CENTER);
   }
 }
 
@@ -863,167 +1027,303 @@ static void draw_alt_bands(Fx& f, int x0, int y0, int w, int h) {
   int mx = 1;
   for (int b = 0; b < 5; b++) mx = LV_MAX(mx, C.bands[b]);
   float bw = w / 5.0f;
+  float r = fminf(bw * 0.22f, 3.5f);
   for (int b = 0; b < 5; b++) {
-    float bh = C.bands[b] ? fmaxf(3.0f, (h - 2) * C.bands[b] / (float)mx) : 2.0f;
+    float bh = C.bands[b] ? fmaxf(2 * r, h * C.bands[b] / (float)mx) : 2 * r;
     float x = x0 + b * bw + bw * 0.5f;
     lv_color_t c = C.bands[b] ? altitude_color((edges[b] + edges[b + 1]) / 2) : p.text3;
-    float r = fminf(bw * 0.3f, 4.0f);
     fx_capsule(f, x, y0 + h - r, x, y0 + h - bh + r, r, c, 255);
   }
 }
 
 static void draw_analog(Fx& f, float cx, float cy, float R) {
   const Palette& p = pal();
+  float big = R >= 30 ? 1.2f : 0.9f;
   for (int i = 0; i < 12; i++) {
     float x0, y0, x1, y1;
     fx_polar(cx, cy, R * 0.86f, i * 30.0f, &x0, &y0);
     fx_polar(cx, cy, R * (i % 3 ? 0.78f : 0.70f), i * 30.0f, &x1, &y1);
-    fx_capsule(f, x0, y0, x1, y1, i % 3 ? 0.6f : 1.1f, p.text2, 255);
+    fx_capsule(f, x0, y0, x1, y1, i % 3 ? big * 0.5f : big, p.text2, 255);
   }
   if (!C.time_ok) return;
   float hrs = (C.lt.tm_hour % 12) + C.lt.tm_min / 60.0f;
   float mins = C.lt.tm_min + C.lt.tm_sec / 60.0f;
   float x, y;
-  fx_polar(cx, cy, R * 0.45f, hrs * 30.0f, &x, &y);
-  fx_capsule(f, cx, cy, x, y, 1.9f, p.text, 255);
-  fx_polar(cx, cy, R * 0.72f, mins * 6.0f, &x, &y);
-  fx_capsule(f, cx, cy, x, y, 1.3f, p.text, 255);
+  fx_polar(cx, cy, R * 0.46f, hrs * 30.0f, &x, &y);
+  fx_capsule(f, cx, cy, x, y, big * 1.6f, p.text, 255);
+  fx_polar(cx, cy, R * 0.70f, mins * 6.0f, &x, &y);
+  fx_capsule(f, cx, cy, x, y, big * 1.1f, p.text, 255);
   fx_polar(cx, cy, R * 0.80f, C.lt.tm_sec * 6.0f, &x, &y);
   float bx, by;
   fx_polar(cx, cy, R * 0.18f, C.lt.tm_sec * 6.0f + 180.0f, &bx, &by);
   fx_capsule(f, bx, by, x, y, 0.6f, p.orange, 255);
-  fx_disc(f, cx, cy, 2.4f, p.orange, 255);
+  fx_disc(f, cx, cy, big * 2.0f, p.orange, 255);
+  fx_disc(f, cx, cy, big * 0.8f, p.platter, 255);
 }
 
-static void draw_compass(Fx& f, lv_draw_ctx_t* dc, float cx, float cy, float R, const CompData& d) {
+/* Wind: a compass ring with a pointer, the speed and its unit in the middle. */
+static void draw_compass(Fx& f, lv_draw_ctx_t* dc, Slot* s, float cx, float cy, float R, const CompData& d) {
   const Palette& p = pal();
+  float D = 2 * R;
+  bool small = D < 70;
   for (int i = 0; i < 36; i++) {
+    if (small && i % 3) continue; /* every 30 degrees on a small dial */
     float x0, y0, x1, y1;
-    fx_polar(cx, cy, R * 0.86f, i * 10.0f, &x0, &y0);
-    fx_polar(cx, cy, R * (i % 9 ? 0.80f : 0.74f), i * 10.0f, &x1, &y1);
-    fx_capsule(f, x0, y0, x1, y1, i % 9 ? 0.45f : 0.9f, i == 0 ? p.red : p.text3, 255);
+    bool major = i % 9 == 0;
+    fx_polar(cx, cy, R * 0.88f, i * 10.0f, &x0, &y0);
+    fx_polar(cx, cy, R * (major ? 0.74f : 0.80f), i * 10.0f, &x1, &y1);
+    fx_capsule(f, x0, y0, x1, y1, major ? 0.9f : 0.45f, i == 0 ? p.red : p.text3, 255);
   }
   if (d.value[0] != '-') {
     float hx, hy, lx, ly, rx, ry;
-    fx_polar(cx, cy, R * 0.84f, d.angle, &hx, &hy);
-    fx_polar(cx, cy, R * 0.66f, d.angle - 9, &lx, &ly);
-    fx_polar(cx, cy, R * 0.66f, d.angle + 9, &rx, &ry);
+    fx_polar(cx, cy, R * 0.72f, d.angle, &hx, &hy);
+    fx_polar(cx, cy, R * 0.54f, d.angle - 13, &lx, &ly);
+    fx_polar(cx, cy, R * 0.54f, d.angle + 13, &rx, &ry);
     const float tri[] = {hx, hy, lx, ly, rx, ry};
     fx_polygon(f, tri, 3, d.tint, 255);
   }
-  txt(dc, d.value, &fs_text_20, p.text, 255, (int)cx, (int)(cy - 14), LV_TEXT_ALIGN_CENTER);
-  txt(dc, d.unit, &fs_text_12, p.text2, 255, (int)cx, (int)(cy + 6), LV_TEXT_ALIGN_CENTER);
+  /* speed over unit, centred as a pair inside the pointer's circle */
+  float inner = R * 0.50f;
+  const lv_font_t* uf = &fs_text_14;
+  bool unit = d.unit[0] && !small;
+  int uh = unit ? (has_caps(d.unit) ? ink(uf).cap() : x_height(uf)) : 0;
+  int gap = unit ? (int)lroundf(D * 0.05f) : 0;
+  const lv_font_t* vf = fit(d.value, d.numeric, nullptr, (int)(inner * 1.7f), (int)(D * (small ? 0.26f : 0.22f)));
+  if (!vf) vf = &fs_text_12;
+  int vcap = ink(vf).cap();
+  float top = cy - (vcap + gap + uh) / 2.0f;
+  int vbase = (int)lroundf(top + vcap);
+  Shown sh = {vf, d.value, nullptr};
+  draw_pair(dc, s, d, sh, p.text, (int)lroundf(cx), vbase, LV_TEXT_ALIGN_CENTER);
+  if (unit) txt_base(dc, d.unit, uf, p.text2, (int)lroundf(cx), vbase + gap + uh, LV_TEXT_ALIGN_CENTER);
+}
+
+/* Calendar page: weekday over the day of the month, centred as a pair. */
+static void draw_calendar(lv_draw_ctx_t* dc, Slot* s, float cx, float cy, float D, const CompData& d) {
+  const Palette& p = pal();
+  const lv_font_t* wf = D >= 70 ? &fs_text_14 : &fs_text_12;
+  const lv_font_t* nf = D >= 80 ? &fs_text_30 : (D >= 56 ? &fs_text_24 : &fs_text_20);
+  int wc = ink(wf).cap(), nc = ink(nf).cap();
+  int gap = (int)lroundf(D * 0.07f);
+  float top = cy - (wc + gap + nc) / 2.0f;
+  int wbase = (int)lroundf(top + wc);
+  txt_base(dc, d.title, wf, d.tint, (int)lroundf(cx), wbase, LV_TEXT_ALIGN_CENTER);
+  Shown sh = {nf, d.value, nullptr};
+  draw_pair(dc, s, d, sh, p.text, (int)lroundf(cx), wbase + gap + nc, LV_TEXT_ALIGN_CENTER);
+}
+
+/* Sunrise & Sunset: the sun's path over the horizon, the next event under it. */
+static void draw_solar_dial(Fx& f, lv_draw_ctx_t* dc, float cx, float cy, float R, const CompData& d) {
+  const Palette& p = pal();
+  float D = 2 * R;
+  float hy = cy + R * 0.10f; /* horizon */
+  float ar = R * 0.60f;      /* path radius */
+  float hw = D >= 64 ? 1.0f : 0.8f;
+  fx_capsule(f, cx - R * 0.80f, hy, cx + R * 0.80f, hy, 0.6f, p.text3, 255);
+  fx_arc(f, cx, hy, ar, hw * 0.8f, 270, 450, p.text3, 170, true);
+  if (C.sun.valid && C.sun.sunrise && C.sun.sunset) {
+    float t = (float)(C.now - C.sun.sunrise) / (float)(C.sun.sunset - C.sun.sunrise);
+    if (t >= 0 && t <= 1) {
+      fx_arc(f, cx, hy, ar, hw * 1.3f, 270, 270 + 180 * t, p.orange, 255, true);
+      float sx, sy;
+      fx_polar(cx, hy, ar, 270 + 180 * t, &sx, &sy);
+      fx_disc(f, sx, sy, D * 0.07f + 1.0f, p.platter, 255);
+      fx_disc(f, sx, sy, D * 0.07f, p.sun, 255);
+    }
+  }
+  /* the next sunrise or sunset, centred in the band under the horizon */
+  const lv_font_t* tf = D >= 70 ? &fs_text_14 : &fs_text_12;
+  int cap = ink(tf).cap();
+  float mid = hy + (cy + R - hy) * 0.46f;
+  int base = (int)lroundf(mid + cap / 2.0f);
+  float half = sqrtf(fmaxf(0.0f, (R - 3) * (R - 3) - (base - cy) * (base - cy)));
+  char line[24];
+  snprintf(line, sizeof(line), "%s%s", d.glyph == GLYPH_SUNSET ? "\xE2\x86\x93" : "\xE2\x86\x91", d.value);
+  if (text_w(line, tf) > 2 * half) snprintf(line, sizeof(line), "%s", d.value);
+  txt_base(dc, line, tf, p.text, (int)lroundf(cx), base, LV_TEXT_ALIGN_CENTER);
 }
 
 /* ------------------------------------------------------------------------ */
 /* Family renderers                                                          */
 /* ------------------------------------------------------------------------ */
 
-static void render_large(Fx& f, lv_draw_ctx_t* dc, Slot* s, const CompData& d, const lv_area_t& a) {
+/* Short captions for tight slots, instead of an ellipsis in capitals. */
+static const char* short_title(const char* t) {
+  static const char* const SHORT[][2] = {{"TEMPERATURE", "TEMP"}, {"EARTHQUAKE", "QUAKE"}, {"NEXT HOURS", "FORECAST"}};
+  for (auto& sc : SHORT)
+    if (!strcmp(t, sc[0])) return sc[1];
+  return t;
+}
+
+/* Caption, value and secondary line stacked at (x, y) in a w x h box, the
+ * stack centred vertically; used by the cards and the large slots. */
+struct Block {
+  const lv_font_t* cf; /* caption */
+  const lv_font_t* sf; /* secondary */
+  int max_vcap;        /* tallest value figures allowed */
+  bool header_glyph;
+  lv_color_t glyph_bg;
+};
+
+static void draw_block(Fx& f, lv_draw_ctx_t* dc, Slot* s, const CompData& d, int x, int y, int w, int h,
+                       const Block& b, const char* second) {
   const Palette& p = pal();
-  int w = lv_area_get_width(&a), h = lv_area_get_height(&a);
-  if (d.custom == CUSTOM_BIGTIME) {
-    /* hero time: big numerals, small AM/PM, date underneath */
-    int dateh = h >= 70 ? fs_text_16.line_height : fs_text_14.line_height;
-    int ap_w = d.unit[0] ? text_w(d.unit, &fs_text_16) + 6 : 0;
-    const lv_font_t* tf = fit_font(d.value, true, w - ap_w - 2, h - dateh - 2);
-    int tw = text_w(d.value, tf);
-    int ty = a.y1 + 2;
-    value_txt(dc, s, d.value, s ? s->prev.value : "", tf, p.text, a.x1, ty - tf->base_line / 8, LV_TEXT_ALIGN_LEFT);
-    if (d.unit[0]) txt(dc, d.unit, &fs_text_16, p.text2, 255, a.x1 + tw + 5, ty + tf->line_height / 5, LV_TEXT_ALIGN_LEFT);
-    int dy = ty + tf->line_height - tf->line_height / 7;
-    const lv_font_t* df = h >= 70 ? &fs_text_16 : &fs_text_14;
-    int ww = text_w(d.title, df);
-    txt(dc, d.title, df, d.tint, 255, a.x1 + 1, dy, LV_TEXT_ALIGN_LEFT);
-    txt(dc, d.line3, df, p.text, 255, a.x1 + 1 + ww + 6, dy, LV_TEXT_ALIGN_LEFT);
-    return;
+  int ccap = ink(b.cf).cap(), scap = ink(b.sf).cap();
+  int g1 = h >= 56 ? 5 : 4, g2 = h >= 56 ? 5 : 3;
+  /* one row (value, then the secondary line beside it) if two won't fit */
+  int room2 = h - ccap - g1 - g2 - scap;
+  bool two_rows = second[0] && room2 >= 11;
+  int vroom = LV_MIN(b.max_vcap, two_rows ? room2 : h - ccap - g1);
+  int min_cap = LV_MIN(vroom, 11);
+  Shown sh = fit_value(d, w, vroom, min_cap);
+  int vcap = ink(sh.f).cap();
+  if (two_rows) g2 = LV_MAX(g2, LV_MIN(vcap / 4, room2 - vcap + g2)); /* big figures get more air */
+  int used = ccap + g1 + vcap + (two_rows ? g2 + scap : 0);
+  int top = y + (h - used) / 2;
+
+  /* caption, with a small glyph when there's room; long captions have a
+   * short form rather than an ellipsis */
+  int cbase = top + ccap;
+  int hx = x;
+  const char* title = text_w(d.title, b.cf) <= w ? d.title : short_title(d.title);
+  if (b.header_glyph && d.glyph && d.glyph != GLYPH_WEATHER && d.glyph != GLYPH_MOON) {
+    float gs = ccap * 1.75f;
+    if (text_w(title, b.cf) + gs + 4 > w) title = short_title(title);
+    if (text_w(title, b.cf) + gs + 4 <= w) {
+      glyph_draw(f, d.glyph, x + gs / 2.0f, cbase - ccap / 2.0f, gs, glyph_args(d, b.glyph_bg));
+      hx += (int)lroundf(gs) + 4;
+    }
   }
-  if (d.custom == CUSTOM_SOLAR || d.custom == CUSTOM_HOURLY || d.custom == CUSTOM_ALT_BANDS) {
-    platter_rect(dc, a, 18);
-    int pad = 10;
-    txt(dc, d.title, &fs_text_12, d.tint, 255, a.x1 + pad, a.y1 + pad - 2, LV_TEXT_ALIGN_LEFT);
-    const lv_font_t* vf = fit_font(d.value, d.numeric, w / 2, h / 2);
-    value_txt(dc, s, d.value, s ? s->prev.value : "", vf, p.text, a.x1 + pad, a.y1 + pad + 12, LV_TEXT_ALIGN_LEFT);
-    if (d.unit[0])
-      txt(dc, d.unit, &fs_text_14, p.text2, 255, a.x1 + pad + text_w(d.value, vf) + 4, a.y1 + pad + 12 + vf->line_height - 20,
-          LV_TEXT_ALIGN_LEFT);
-    int cx0 = a.x1 + w / 2, cy0 = a.y1 + pad, cw = w / 2 - pad, ch = h - 2 * pad;
-    if (d.custom == CUSTOM_SOLAR) draw_solar_curve(f, dc, cx0, cy0, cw, ch, false);
-    if (d.custom == CUSTOM_HOURLY) draw_hourly(f, dc, cx0, cy0, cw, ch);
-    if (d.custom == CUSTOM_ALT_BANDS) draw_alt_bands(f, cx0, cy0, cw, ch);
-    txt(dc, d.line2, &fs_text_14, p.text2, 255, a.x1 + pad, a.y2 - pad - 16, LV_TEXT_ALIGN_LEFT);
-    return;
+  txt_fit(dc, title, b.cf, d.tint, hx, cbase, x + w - hx);
+
+  int vbase = cbase + g1 + vcap;
+  draw_pair(dc, s, d, sh, p.text, x, vbase, LV_TEXT_ALIGN_LEFT);
+  if (!second[0]) return;
+  if (two_rows) {
+    txt_fit(dc, second, b.sf, p.text2, x, vbase + g2 + scap, w);
+  } else { /* beside the value, whole or not at all */
+    int sx = x + pair_w(sh.v, sh.f, sh.u) + 8;
+    if (text_w(second, b.sf) <= x + w - sx) txt_base(dc, second, b.sf, p.text2, sx, vbase, LV_TEXT_ALIGN_LEFT);
   }
-  /* generic: glyph + big value */
-  float gs = fminf(h * 0.8f, 64.0f);
-  int gx = a.x1;
-  if (d.glyph) {
-    glyph_draw(f, d.glyph, a.x1 + gs / 2, a.y1 + h / 2.0f, gs, glyph_args(d, p.bg));
-    gx = a.x1 + (int)gs + 6;
-  }
-  const lv_font_t* vf = fit_font(d.value, d.numeric, a.x2 - gx - 30, h - 34);
-  txt(dc, d.title, &fs_text_12, d.tint, 255, gx, a.y1 + 2, LV_TEXT_ALIGN_LEFT);
-  value_txt(dc, s, d.value, s ? s->prev.value : "", vf, p.text, gx, a.y1 + 14, LV_TEXT_ALIGN_LEFT);
-  if (d.unit[0]) txt(dc, d.unit, &fs_text_16, p.text2, 255, gx + text_w(d.value, vf) + 4, a.y1 + 18, LV_TEXT_ALIGN_LEFT);
-  txt(dc, d.line2, &fs_text_14, p.text2, 255, gx, a.y1 + 14 + vf->line_height, LV_TEXT_ALIGN_LEFT);
 }
 
 static void render_rect(Fx& f, lv_draw_ctx_t* dc, Slot* s, const CompData& d, const lv_area_t& a) {
+  int w = lv_area_get_width(&a), h = lv_area_get_height(&a);
+  platter_rect(dc, a, h >= 56 ? 16 : 12);
+  int pad = (h >= 56 && w >= 140) ? 10 : 8;
+  int x0 = a.x1 + pad, y0 = a.y1 + pad - 1, cw = w - 2 * pad, ch = h - 2 * pad + 2;
+  bool wide = w >= 200;
+  /* the right of a wide card holds a chart, or the weather or moon picture */
+  bool chart = wide && ((d.custom == CUSTOM_HOURLY && ch >= 40) || d.custom == CUSTOM_SOLAR || d.custom == CUSTOM_ALT_BANDS);
+  bool picture = wide && !chart && (d.glyph == GLYPH_WEATHER || d.glyph == GLYPH_MOON);
+  int right = chart ? (int)lroundf(w * 0.44f) : (picture ? ch : 0);
+  int tw = cw - (right ? right + 8 : 0);
+
+  char second[96];
+  if (d.line3[0] && wide && !chart && h >= 50 && text_w(d.line2, h >= 60 ? &fs_text_14 : &fs_text_12) < tw * 2 / 3)
+    snprintf(second, sizeof(second), "%s \xC2\xB7 %s", d.line2, d.line3);
+  else
+    snprintf(second, sizeof(second), "%s", d.line2);
+  Block b = {&fs_text_12, h >= 60 ? &fs_text_14 : &fs_text_12, h >= 66 ? 22 : 17, true, pal().platter};
+  draw_block(f, dc, s, d, x0, y0, tw, ch, b, second);
+
+  if (chart) {
+    int rx = x0 + cw - right;
+    if (d.custom == CUSTOM_SOLAR) draw_solar_curve(f, dc, rx, y0 + 2, right, ch - 4, false);
+    if (d.custom == CUSTOM_HOURLY) draw_hourly(f, dc, rx, y0, right, ch);
+    if (d.custom == CUSTOM_ALT_BANDS) draw_alt_bands(f, rx + 4, y0 + 4, right - 8, ch - 8);
+  } else if (picture) {
+    float gs = (float)ch;
+    glyph_draw(f, d.glyph, x0 + cw - gs / 2.0f, y0 + ch / 2.0f, gs, glyph_args(d, pal().platter));
+  }
+}
+
+/* The hero time: big figures, a small AM/PM level with their tops, the
+ * weekday and date underneath. */
+static void draw_bigtime(lv_draw_ctx_t* dc, Slot* s, const CompData& d, const lv_area_t& a) {
   const Palette& p = pal();
   int w = lv_area_get_width(&a), h = lv_area_get_height(&a);
-  platter_rect(dc, a, 16);
-  int pad = 10;
-  bool wide = w >= 220;
-  int text_w_max = wide ? (d.custom ? w * 45 / 100 : w - 2 * pad - (d.glyph ? h - 8 : 0)) : w - 2 * pad;
-
-  /* header: small glyph + title */
-  int hx = a.x1 + pad;
-  if (d.glyph && d.glyph != GLYPH_WEATHER && d.glyph != GLYPH_MOON) {
-    glyph_draw(f, d.glyph, hx + 7, a.y1 + pad + 6, 15, glyph_args(d, p.platter));
-    hx += 18;
+  const lv_font_t* df = h >= 70 ? &fs_text_16 : &fs_text_14;
+  int dcap = ink(df).cap();
+  /* size by the widest time ("00:00") so the figures never jump a size */
+  const char* ap = d.unit[0] ? d.unit : nullptr;
+  int max_cap = h - dcap - 10;
+  const lv_font_t* tf = fit("00:00", true, ap, w - 2, max_cap);
+  if (!tf) tf = fit(d.value, true, ap, w - 2, max_cap);
+  if (!tf) tf = &fs_text_16;
+  Ink ti = ink(tf);
+  int gap = LV_MAX(5, ti.cap() / 5);
+  int used = ti.cap() + gap + dcap;
+  int top = a.y1 + (h - used) / 2;
+  int tbase = top + ti.cap();
+  int x = a.x1 + 1;
+  const char* prev = s ? s->prev.value : "";
+  value_txt(dc, s, d.value, prev, tf, p.text, x, tbase - ti.base, LV_TEXT_ALIGN_LEFT);
+  if (ap) { /* small caps level with the top of the figures */
+    const lv_font_t* uf = unit_font(tf);
+    txt(dc, ap, uf, p.text2, 255, x + text_w(d.value, tf) + unit_gap(tf), top - ink(uf).top, LV_TEXT_ALIGN_LEFT);
   }
-  txt_fit(dc, d.title, &fs_text_12, d.tint, hx, a.y1 + pad - 3, a.x2 - pad - hx);
+  int dbase = tbase + gap + dcap;
+  txt_base(dc, d.title, df, d.tint, x, dbase, LV_TEXT_ALIGN_LEFT);
+  txt_fit(dc, d.line3, df, p.text, x + text_w(d.title, df) + (d.title[0] ? 5 : 0), dbase, w);
+}
 
-  int body_y = a.y1 + pad + 11;
-  int body_h = h - pad - 11 - 6;
-  bool has_chart = wide && (d.custom == CUSTOM_SOLAR || d.custom == CUSTOM_HOURLY || d.custom == CUSTOM_ALT_BANDS);
-  if (!wide && h < 80 && (d.custom == CUSTOM_SOLAR || d.custom == CUSTOM_HOURLY)) {
-    /* narrow rect: value line + chart under it */
-    const lv_font_t* vf = fit_font(d.value, d.numeric, w - 2 * pad - 30, 26);
-    value_txt(dc, s, d.value, s ? s->prev.value : "", vf, p.text, a.x1 + pad, body_y, LV_TEXT_ALIGN_LEFT);
-    if (d.unit[0]) txt(dc, d.unit, &fs_text_12, p.text2, 255, a.x1 + pad + text_w(d.value, vf) + 3, body_y + 6, LV_TEXT_ALIGN_LEFT);
-    if (d.custom == CUSTOM_SOLAR)
-      draw_solar_curve(f, dc, a.x1 + pad, body_y + vf->line_height - 2, w - 2 * pad, a.y2 - pad - (body_y + vf->line_height - 2), false);
-    else
-      txt_fit(dc, d.line2, &fs_text_12, p.text2, a.x1 + pad, body_y + vf->line_height, w - 2 * pad);
-    return;
+static void render_large(Fx& f, lv_draw_ctx_t* dc, Slot* s, const CompData& d, const lv_area_t& a) {
+  int w = lv_area_get_width(&a), h = lv_area_get_height(&a);
+  if (d.custom == CUSTOM_BIGTIME) return draw_bigtime(dc, s, d, a);
+  /* charts, and anything in a small hero slot, use the card */
+  if (w < 150 || d.custom == CUSTOM_SOLAR || d.custom == CUSTOM_HOURLY || d.custom == CUSTOM_ALT_BANDS)
+    return render_rect(f, dc, s, d, a);
+  /* the picture on the left, the text beside it, centred on each other */
+  float gs = d.glyph ? fminf(fminf(h * 0.86f, 64.0f), w * 0.28f) : 0;
+  int gx = a.x1;
+  if (gs > 0) {
+    glyph_draw(f, d.glyph, a.x1 + gs / 2.0f, a.y1 + h / 2.0f, gs, glyph_args(d, pal().bg));
+    gx = a.x1 + (int)lroundf(gs) + 8;
   }
-  const lv_font_t* vf = fit_font(d.value, d.numeric, text_w_max - (d.unit[0] ? 30 : 0), LV_MIN(body_h - 14, 34));
-  value_txt(dc, s, d.value, s ? s->prev.value : "", vf, p.text, a.x1 + pad, body_y, LV_TEXT_ALIGN_LEFT);
-  int vw = text_w(d.value, vf);
-  if (d.unit[0]) txt(dc, d.unit, &fs_text_14, p.text2, 255, a.x1 + pad + vw + 4, body_y + vf->line_height - 18, LV_TEXT_ALIGN_LEFT);
-  int ly = body_y + vf->line_height - 2;
-  if (ly + 12 <= a.y2) {
-    char line[90];
-    if (d.line3[0] && wide && !has_chart)
-      snprintf(line, sizeof(line), "%s \xC2\xB7 %s", d.line2, d.line3);
-    else
-      snprintf(line, sizeof(line), "%s", d.line2);
-    txt_fit(dc, line, &fs_text_14, p.text2, a.x1 + pad, ly, (has_chart ? w * 45 / 100 : w - pad) - pad);
-  } else if (d.line2[0] && !has_chart) { /* short: line2 to the right of the value */
-    txt(dc, d.line2, &fs_text_14, p.text2, 255, a.x1 + pad + vw + (d.unit[0] ? 36 : 10), body_y + vf->line_height - 18,
-        LV_TEXT_ALIGN_LEFT);
-  }
+  Block b = {&fs_text_12, h >= 70 ? &fs_text_16 : &fs_text_14, h >= 80 ? 30 : 22, false, pal().bg};
+  draw_block(f, dc, s, d, gx, a.y1, a.x2 + 1 - gx, h, b, d.line2);
+}
 
-  if (has_chart) {
-    int cx0 = a.x1 + w * 45 / 100 + 4, cw = a.x2 - pad - cx0;
-    int cy0 = a.y1 + 6, ch = h - 12;
-    if (d.custom == CUSTOM_SOLAR) draw_solar_curve(f, dc, cx0, cy0, cw, ch, h >= 56); /* labels need room */
-    if (d.custom == CUSTOM_HOURLY) draw_hourly(f, dc, cx0, cy0, cw, ch);
-    if (d.custom == CUSTOM_ALT_BANDS) draw_alt_bands(f, cx0, cy0 + 6, cw, ch - 10);
-  } else if (wide && d.glyph) {
-    float gs = h - 14.0f;
-    glyph_draw(f, d.glyph, a.x2 - pad - gs / 2, a.y1 + h / 2.0f, gs, glyph_args(d, p.platter));
+/* A gauge open at the bottom: the value in the middle, a glyph or the
+ * low/high pair in the opening. R is the dial's outer radius. */
+static void draw_gauge_dial(Fx& f, lv_draw_ctx_t* dc, Slot* s, const CompData& d, float cx, float cy, float R,
+                            const GlyphArgs& ga) {
+  const Palette& p = pal();
+  float D = 2 * (R + 1);
+  int icx = (int)lroundf(cx);
+  /* gauge open at the bottom; the value in the middle, a glyph or the
+   * low/high pair in the opening */
+  float hw = D >= 64 ? 2.6f : 2.1f;
+  float gr = R - hw - 2.4f;
+  draw_gauge_arc(f, cx, cy, gr, hw, 240, 240, d);
+  float inner = gr - hw - 2.0f;
+  Shown sh = fit_bold(d, (int)(2 * inner * 0.92f), (int)(D * 0.24f));
+  if (!sh.f) sh = fit_value(d, (int)(2 * inner * 0.92f), (int)(D * 0.24f));
+  int vcap = ink(sh.f).cap();
+  int vbase = (int)lroundf(cy - D * 0.03f + vcap / 2.0f);
+  draw_pair(dc, s, d, sh, p.text, icx, vbase, LV_TEXT_ALIGN_CENTER);
+  float ex = gr * 0.866f, ey = cy + gr * 0.5f; /* where the arc ends */
+  bool labels = false;
+  const lv_font_t* lf = &fs_text_12;
+  int lcap = ink(lf).cap();
+  int lbase = (int)lroundf(ey + lcap / 2.0f);
+  float lx = ex * 0.64f;
+  if (d.lo[0] && d.hi[0]) {
+    int wl = text_w(d.lo, lf), wh = text_w(d.hi, lf);
+    float outer = lx + LV_MAX(wl, wh) / 2.0f;
+    labels = 2 * lx - (wl + wh) / 2.0f >= 4 && sqrtf(outer * outer + (lbase - cy) * (lbase - cy)) <= R - 2 &&
+             lbase - lcap > vbase + 2;
+    if (labels) {
+      txt_base(dc, d.lo, lf, p.text2, (int)lroundf(cx - lx), lbase, LV_TEXT_ALIGN_CENTER);
+      txt_base(dc, d.hi, lf, p.text2, (int)lroundf(cx + lx), lbase, LV_TEXT_ALIGN_CENTER);
+    }
+  }
+  if (!labels && d.glyph) {
+    float gcy = ey + gr * 0.14f;
+    float gs = fminf(gr * 0.56f, (cy + R - 2 - gcy) / (GLYPH_INK / 2));
+    gs = fminf(gs, (gcy - vbase - 2) / (GLYPH_INK / 2));
+    if (gs >= 7) glyph_draw(f, d.glyph, cx, gcy, gs, ga);
   }
 }
 
@@ -1035,63 +1335,50 @@ static void render_circular(Fx& f, lv_draw_ctx_t* dc, Slot* s, const CompData& d
   float R = D / 2.0f - 1;
   fx_disc(f, cx, cy, R, p.platter, 255);
   GlyphArgs ga = glyph_args(d, p.platter);
+  int icx = (int)lroundf(cx);
 
   switch (d.custom) {
     case CUSTOM_ANALOG: draw_analog(f, cx, cy, R); return;
-    case CUSTOM_COMPASS: draw_compass(f, dc, cx, cy, R, d); return;
-    case CUSTOM_CALENDAR:
-      txt(dc, d.title, &fs_text_14, d.tint, 255, (int)cx, (int)(cy - R * 0.62f), LV_TEXT_ALIGN_CENTER);
-      value_txt(dc, s, d.value, s ? s->prev.value : "", D >= 80 ? &fs_text_30 : &fs_text_24, p.text, (int)cx,
-                (int)(cy - R * 0.22f), LV_TEXT_ALIGN_CENTER);
-      return;
-    case CUSTOM_SOLAR: {
-      /* day arc over a horizon line, sun dot at its current position */
-      float ar = R * 0.66f;
-      fx_capsule(f, cx - R * 0.8f, cy + 2, cx + R * 0.8f, cy + 2, 0.7f, p.text3, 255);
-      fx_arc(f, cx, cy + 2, ar, 0.9f, 270, 90, p.text3, 160, true);
-      if (C.sun.valid && C.sun.sunrise && C.sun.sunset) {
-        float t = (float)(C.now - C.sun.sunrise) / (float)(C.sun.sunset - C.sun.sunrise);
-        if (t >= 0 && t <= 1) {
-          fx_arc(f, cx, cy + 2, ar, 1.2f, 270, 270 + 180 * t, p.orange, 255, true);
-          float sx, sy;
-          fx_polar(cx, cy + 2, ar, 270 + 180 * t, &sx, &sy);
-          fx_disc(f, sx, sy, 3.6f, p.sun, 255);
-        }
-      }
-      ga.tint = p.text2;
-      glyph_draw(f, d.glyph, cx, cy + R * 0.38f, R * 0.5f, ga);
-      txt(dc, d.value, &fs_text_14, p.text, 255, (int)cx, (int)(cy - R * 0.45f), LV_TEXT_ALIGN_CENTER);
-      return;
-    }
+    case CUSTOM_COMPASS: draw_compass(f, dc, s, cx, cy, R, d); return;
+    case CUSTOM_CALENDAR: draw_calendar(dc, s, cx, cy, D, d); return;
+    case CUSTOM_SOLAR: draw_solar_dial(f, dc, cx, cy, R, d); return;
     default: break;
   }
 
-  bool gauge = !isnan(d.gauge) || !isnan(d.mark);
-  if (gauge) {
-    float gr = R - 5.5f;
-    draw_gauge_arc(f, cx, cy, gr, 2.6f, 240, 240, d);
-    const lv_font_t* vf = fit_font(d.value, d.numeric, (int)(D * 0.56f), (int)(D * 0.36f));
-    value_txt(dc, s, d.value, s ? s->prev.value : "", vf, p.text, (int)cx, (int)(cy - vf->line_height / 2 - 2),
-              LV_TEXT_ALIGN_CENTER);
-    if (d.lo[0]) {
-      float lx, ly, hx, hy;
-      fx_polar(cx, cy, gr - 1, 225, &lx, &ly);
-      fx_polar(cx, cy, gr - 1, 135, &hx, &hy);
-      txt(dc, d.lo, &fs_text_12, p.text2, 255, (int)lx + 4, (int)ly - 4, LV_TEXT_ALIGN_CENTER);
-      txt(dc, d.hi, &fs_text_12, p.text2, 255, (int)hx - 4, (int)hy - 4, LV_TEXT_ALIGN_CENTER);
-    } else if (d.glyph) {
-      glyph_draw(f, d.glyph, cx, cy + R * 0.48f, R * 0.42f, ga);
-    }
+  if (!isnan(d.gauge) || !isnan(d.mark)) {
+    draw_gauge_dial(f, dc, s, d, cx, cy, R, ga);
     return;
   }
-  /* glyph above value */
-  float gs = R * 0.95f;
-  if (d.glyph) glyph_draw(f, d.glyph, cx, cy - R * 0.28f, gs, ga);
-  const lv_font_t* vf = fit_font(d.value, d.numeric, (int)(D * 0.7f), (int)(D * 0.30f));
-  int vy = d.glyph ? (int)(cy + R * 0.18f) : (int)(cy - vf->line_height / 2);
-  if (d.glyph) vy -= vf->line_height / 6;
-  value_txt(dc, s, d.value, s ? s->prev.value : "", vf, p.text, (int)cx, vy, LV_TEXT_ALIGN_CENTER);
-  if (!d.glyph && d.unit[0]) txt(dc, d.unit, &fs_text_12, p.text2, 255, (int)cx, vy + vf->line_height - 2, LV_TEXT_ALIGN_CENTER);
+
+  /* glyph over value, centred as one group; AM/PM is left out of circles */
+  CompData dv = d;
+  if (dv.ampm) dv.unit[0] = 0;
+  float gap = d.glyph ? D * 0.07f : 0;
+  int max_cap = (int)(D * (d.glyph ? 0.21f : 0.30f));
+  float rr = R - 3;
+  float gs = 0;
+  int max_w = 0;
+  Shown sh = {nullptr, "", nullptr};
+  /* the value's width is bounded by the circle at its baseline; a smaller
+   * glyph lowers the baseline into a wider part of the circle */
+  for (float k = 1.0f; k >= 0.69f && !sh.f; k -= 0.15f) {
+    gs = d.glyph ? D * 0.42f * k : 0;
+    float half = (gs * GLYPH_INK + gap + max_cap) / 2.0f;
+    max_w = (int)(2 * sqrtf(fmaxf(0.0f, rr * rr - half * half)));
+    Shown t = fit_bold(dv, max_w, max_cap);
+    if (t.f) sh = t;
+    else if (!d.glyph) sh = fit_value(dv, max_w, max_cap);
+  }
+  bool show_value = sh.f && sh.v[0];
+  if (!sh.f) sh = {&fs_text_12, "", nullptr}; /* the picture alone */
+  int vcap = show_value ? ink(sh.f).cap() : 0;
+  if (!show_value) { /* the picture alone */
+    gs = D * 0.56f;
+    gap = 0;
+  }
+  float top = cy - (gs * GLYPH_INK + gap + vcap) / 2.0f;
+  if (d.glyph) glyph_draw(f, d.glyph, cx, top + gs * GLYPH_INK / 2.0f, gs, ga);
+  if (show_value) draw_pair(dc, s, dv, sh, p.text, icx, (int)lroundf(top + gs * GLYPH_INK + gap + vcap), LV_TEXT_ALIGN_CENTER);
 }
 
 static float corner_bearing(uint8_t c) {
@@ -1099,63 +1386,97 @@ static float corner_bearing(uint8_t c) {
   return b[c & 3];
 }
 
-static void render_corner(Fx& f, lv_draw_ctx_t* dc, Slot* s, const CompData& d, const lv_area_t& text_area) {
+/* Corners: [glyph] value [unit] with a caption under it (top corners) or
+ * over it (bottom corners), aligned to the corner's outer edge. */
+static void render_corner(Fx& f, lv_draw_ctx_t* dc, Slot* s, const CompData& d, const lv_area_t& ta) {
   const Palette& p = pal();
   uint8_t c = s ? s->def.corner : CORNER_TL;
   bool right = c == CORNER_TR || c == CORNER_BR;
   bool bottom = c == CORNER_BL || c == CORNER_BR;
   /* gauge hugging the radar rim (Instruments corner slots) */
-  if (s && s->rr > 0) {
-    float cb = corner_bearing(c);
-    bool g = !isnan(d.gauge) || !isnan(d.mark);
-    if (g) draw_gauge_arc(f, (float)s->rcx, (float)s->rcy, s->rr + 8.0f, 2.2f, cb - 17, 34, d);
+  if (s && s->rr > 0 && (!isnan(d.gauge) || !isnan(d.mark)))
+    draw_gauge_arc(f, (float)s->rcx, (float)s->rcy, s->rr + 8.0f, 2.2f, corner_bearing(c) - 17, 34, d);
+  int w = lv_area_get_width(&ta), h = lv_area_get_height(&ta);
+  const lv_font_t* cf = &fs_text_12;
+  int ccap = ink(cf).cap(), cgap = 5;
+  /* caption: the title, or the second line if the title is too long */
+  const char* cap = "";
+  if (d.title[0] && text_w(d.title, cf) <= w)
+    cap = d.title;
+  else if (d.title[0] && text_w(short_title(d.title), cf) <= w)
+    cap = short_title(d.title);
+  else if (d.line2[0] && text_w(d.line2, cf) <= w)
+    cap = d.line2;
+  int max_cap = LV_MIN(22, h - 2 - (cap[0] ? ccap + cgap : 0));
+  if (max_cap < 9) {
+    cap = "";
+    max_cap = LV_MIN(22, h - 2);
   }
-  int w = lv_area_get_width(&text_area), h = lv_area_get_height(&text_area);
-  float gs = d.glyph ? fminf(22.0f, h * 0.5f) : 0;
-  char val[32];
-  snprintf(val, sizeof(val), "%s%s%s", d.value, d.unit[0] ? " " : "", d.unit);
-  const lv_font_t* vf = fit_font(val, false, (int)(w - gs - 4), LV_MIN(h - 12, 30));
-  int vw = text_w(val, vf);
-  int x = right ? text_area.x2 : text_area.x1;
-  int y = bottom ? text_area.y2 - vf->line_height : text_area.y1;
-  int title_y = bottom ? y - 12 : y + vf->line_height - 3;
-  GlyphArgs ga = glyph_args(d, p.bg);
-  /* A caption that can't fit (2.8" corners are ~44 px) is left out rather
-   * than run into the radar: the glyph and value still say what it is. */
-  const char* cap = d.title[0] ? d.title : d.line2;
-  if (text_w(cap, &fs_text_12) > w + 12) cap = "";
-  if (right) {
-    value_txt(dc, s, val, "", vf, p.text, x, y, LV_TEXT_ALIGN_RIGHT);
-    if (gs > 0) glyph_draw(f, d.glyph, x - vw - 4 - gs / 2, y + vf->line_height / 2.0f, gs, ga);
-    txt(dc, cap, &fs_text_12, d.tint, 255, x, title_y, LV_TEXT_ALIGN_RIGHT);
-  } else {
-    if (gs > 0) glyph_draw(f, d.glyph, x + gs / 2, y + vf->line_height / 2.0f, gs, ga);
-    value_txt(dc, s, val, "", vf, p.text, x + (int)gs + (gs > 0 ? 4 : 0), y, LV_TEXT_ALIGN_LEFT);
-    txt(dc, cap, &fs_text_12, d.tint, 255, x, title_y, LV_TEXT_ALIGN_LEFT);
+  /* Most information first, at a size that still reads well: glyph, value
+   * and unit; then drop the unit, then the glyph, then use the short value. */
+  Shown sh = {nullptr, d.value, nullptr};
+  float gs = 0;
+  const char* u = d.unit[0] ? d.unit : nullptr;
+  struct Opt {
+    bool glyph;
+    const char* v;
+    const char* u;
+  } opts[6] = {{true, d.value, u}, {true, d.value, nullptr}, {false, d.value, u},
+               {false, d.value, nullptr}, {true, d.vshort, nullptr}, {false, d.vshort, nullptr}};
+  for (int pass = 0; pass < 2 && !sh.f; pass++) {
+    for (int k = 0; k < 6 && !sh.f; k++) {
+      const Opt& o = opts[k];
+      /* a glyph says what the number is, so it's worth a smaller number */
+      int min_cap = pass ? 9 : (o.glyph ? 11 : LV_MAX(11, max_cap * 6 / 10));
+      if (!o.v[0] || (o.glyph && !d.glyph) || (k == 0 && !u) || (k == 2 && !u)) continue;
+      for (const lv_font_t* const* fp = TEXT_FONTS; fp < TEXT_FONTS + 6 && !sh.f; fp++) {
+        int vc = ink(*fp).cap();
+        if (vc > max_cap || vc < min_cap) continue;
+        float g = o.glyph ? fminf(vc * 1.5f, h * 0.6f) : 0;
+        int room = w - (o.glyph ? (int)lroundf(g) + (vc >= 14 ? 4 : 3) : 0);
+        if (pair_w(o.v, *fp, o.u) <= room) {
+          sh = {*fp, o.v, o.u};
+          gs = g;
+        }
+      }
+    }
   }
+  if (!sh.f) sh = {&fs_text_12, d.vshort[0] ? d.vshort : d.value, nullptr};
+  int vcap = ink(sh.f).cap();
+  int vbase = bottom ? ta.y2 - 1 : ta.y1 + 1 + vcap;
+  int cbase = bottom ? vbase - vcap - cgap : vbase + cgap + ccap;
+  int pw = pair_w(sh.v, sh.f, sh.u);
+  int gw = gs > 0 ? (int)lroundf(gs) + (vcap >= 14 ? 4 : 3) : 0;
+  int x = right ? ta.x2 + 1 - pw - gw : ta.x1;
+  if (gs > 0) glyph_draw(f, d.glyph, x + gs / 2.0f, vbase - vcap / 2.0f, gs, glyph_args(d, p.bg));
+  draw_pair(dc, s, d, sh, p.text, x + gw, vbase, LV_TEXT_ALIGN_LEFT);
+  if (cap[0]) txt_base(dc, cap, cf, d.tint, right ? ta.x2 + 1 : ta.x1, cbase, right ? LV_TEXT_ALIGN_RIGHT : LV_TEXT_ALIGN_LEFT);
 }
 
+/* One line: glyph, value, and a second part in grey, on one baseline and
+ * centred as a group. */
 static void render_inline(Fx& f, lv_draw_ctx_t* dc, Slot* s, const CompData& d, const lv_area_t& a) {
   const Palette& p = pal();
-  int h = lv_area_get_height(&a);
-  char main[48];
-  snprintf(main, sizeof(main), "%s%s%s", d.value, d.unit[0] ? " " : "", d.unit);
+  int w = lv_area_get_width(&a), h = lv_area_get_height(&a);
   const lv_font_t* mf = h >= 30 ? &fs_text_20 : &fs_text_16;
   const lv_font_t* sf = h >= 30 ? &fs_text_16 : &fs_text_14;
-  const char* second = d.line2[0] ? d.line2 : d.title;
-  int gs = d.glyph ? h - 6 : 0;
-  int mw = text_w(main, mf), sw = second[0] ? text_w(second, sf) + 10 : 0;
-  int total = gs + (gs ? 6 : 0) + mw + sw;
-  int x = a.x1 + (lv_area_get_width(&a) - total) / 2;
-  if (x < a.x1) x = a.x1;
+  int mcap = ink(mf).cap();
   float cy = a.y1 + h / 2.0f;
-  if (gs) {
-    glyph_draw(f, d.glyph, x + gs / 2.0f, cy, (float)gs, glyph_args(d, p.bg));
-    x += gs + 6;
-  }
-  value_txt(dc, s, main, s ? s->prev.value : "", mf, p.text, x, (int)(cy - mf->line_height / 2.0f), LV_TEXT_ALIGN_LEFT);
-  x += mw + 10;
-  if (second[0]) txt(dc, second, sf, p.text2, 255, x, (int)(cy - sf->line_height / 2.0f), LV_TEXT_ALIGN_LEFT);
+  int base = (int)lroundf(cy + mcap / 2.0f);
+  float gs = d.glyph ? fminf(mcap * 1.75f, h - 2.0f) : 0;
+  int gw = gs > 0 ? (int)lroundf(gs) + 6 : 0;
+  Shown sh = {mf, d.value, d.unit[0] ? d.unit : nullptr};
+  int mw = pair_w(sh.v, mf, sh.u);
+  const char* second = d.line2[0] ? d.line2 : d.title;
+  const int space = 10;
+  int sw = second[0] ? text_w(second, sf) : 0;
+  int avail = w - gw - mw - space;
+  if (sw > avail) sw = avail >= 40 ? avail : 0;
+  int total = gw + mw + (sw ? space + sw : 0);
+  int x = a.x1 + LV_MAX(0, (w - total) / 2);
+  if (gs > 0) glyph_draw(f, d.glyph, x + gs / 2.0f, cy, gs, glyph_args(d, p.bg));
+  draw_pair(dc, s, d, sh, p.text, x + gw, base, LV_TEXT_ALIGN_LEFT);
+  if (sw) txt_fit(dc, second, sf, p.text2, x + gw + mw + space, base, sw);
 }
 
 static void render(lv_draw_ctx_t* dc, Slot* s, uint8_t family, const CompData& d, const lv_area_t& a) {
@@ -1186,19 +1507,35 @@ void comp_draw_gauge(lv_draw_ctx_t* dc, uint8_t comp, float cx, float cy, float 
   CompData d;
   comp_build(comp, FAM_CIRCULAR, d);
   if (d.custom == CUSTOM_COMPASS) {
-    draw_compass(f, dc, cx, cy, r, d);
+    draw_compass(f, dc, nullptr, cx, cy, r, d);
     return;
   }
-  draw_gauge_arc(f, cx, cy, r - 5, 2.6f, 240, 240, d);
-  const lv_font_t* vf = fit_font(d.value, d.numeric, (int)(r * 1.2f), (int)(r * 0.8f));
-  txt(dc, d.value, vf, pal().text, 255, (int)cx, (int)(cy - vf->line_height / 2 - 2), LV_TEXT_ALIGN_CENTER);
-  if (d.line2[0]) txt(dc, d.line2, &fs_text_12, pal().text2, 255, (int)cx, (int)(cy + r * 0.55f), LV_TEXT_ALIGN_CENTER);
+  draw_gauge_dial(f, dc, nullptr, d, cx, cy, r, glyph_args(d, pal().platter));
 }
 
-void comp_draw_preview(lv_draw_ctx_t* dc, uint8_t comp, uint8_t family, const lv_area_t& area) {
+void comp_text_base(lv_draw_ctx_t* dc, const char* s, const lv_font_t* f, lv_color_t c, int x, int base,
+                    lv_text_align_t al) {
+  txt_base(dc, s, f, c, x, base, al);
+}
+
+void comp_text_fit(lv_draw_ctx_t* dc, const char* s, const lv_font_t* f, lv_color_t c, int x, int base, int max_w,
+                   lv_text_align_t al) {
+  txt_fit(dc, s, f, c, x, base, max_w, al);
+}
+
+int comp_text_w(const char* s, const lv_font_t* f) { return text_w(s, f); }
+int comp_font_cap(const lv_font_t* f) { return ink(f).cap(); }
+
+void comp_draw_preview(lv_draw_ctx_t* dc, uint8_t comp, uint8_t family, const lv_area_t& area, uint8_t corner) {
   CompData d;
   comp_build(comp, family, d);
-  render(dc, nullptr, family, d, area);
+  if (family != FAM_CORNER) return render(dc, nullptr, family, d, area);
+  Slot s; /* corner widgets align to their corner */
+  memset(&s, 0, sizeof(s));
+  s.def.family = FAM_CORNER;
+  s.def.corner = corner;
+  s.anim = 1024;
+  render(dc, &s, family, d, area);
 }
 
 /* ------------------------------------------------------------------------ */

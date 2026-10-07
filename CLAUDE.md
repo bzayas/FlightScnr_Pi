@@ -83,6 +83,7 @@ make -C sim check                          # installer schema (cyd/installer/js/
 make -C test/fetch check                   # HTTP/HTTPS client tests
 python3 tools/build_portal.py [--check]    # re-embed cyd/installer as the device portal after editing it
 python3 tools/make_gallery.py shots        # regenerate installer + guide screenshots from all four sim sizes
+sim/build/fs_sim --gallery --out gallery   # every widget at every slot size + every glyph, for design review
 ```
 
 - ESP32 without PSRAM: memory is the main constraint. HTTPS is BearSSL in a static block (`src/net/fetch.cpp`); the net task runs on core 0 at priority 1; Traffic and Settings are drawn lists built on demand.

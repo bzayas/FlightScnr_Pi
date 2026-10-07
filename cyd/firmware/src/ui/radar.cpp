@@ -425,6 +425,25 @@ __attribute__((noinline)) static void sync_flights(uint32_t now) {
   s_tags_next_ms = 0; /* re-place labels with the new data */
 }
 
+static void range_label(int ring, char* buf, size_t n) {
+  float v = dist_from_nm(s_range_disp * ring / RING_COUNT);
+  if (v >= 10)
+    snprintf(buf, n, "%d%s", (int)lroundf(v), dist_unit());
+  else
+    snprintf(buf, n, "%.1f%s", v, dist_unit());
+}
+
+static const char* const CARDINALS[8] = {"N", "NE", "E", "SE", "S", "SW", "W", "NW"};
+static const int LABEL_OBSTACLES = 16; /* compass letters + ring distances */
+
+/* A label centred on (x, y) relative to the radar centre, as a box. */
+static lv_area_t label_box(const char* s, const lv_font_t* f, float x, float y) {
+  lv_point_t sz;
+  lv_txt_get_size(&sz, s, f, 0, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
+  lv_coord_t x1 = (lv_coord_t)lroundf(x - sz.x / 2.0f), y1 = (lv_coord_t)lroundf(y - sz.y / 2.0f);
+  return {x1, y1, (lv_coord_t)(x1 + sz.x), (lv_coord_t)(y1 + sz.y)};
+}
+
 /* Greedy label placement: nearest / most important first, four candidate
  * positions each, skip what would overlap (Pi: label_layout.py, simplified). */
 /* noinline: works around an xtensa GCC 8.4 ICE when inlined */
@@ -456,13 +475,30 @@ __attribute__((noinline)) static void place_tags() {
   if (!s_boxes) return;
   /* Obstacles: every visible icon, so a tag never hides another plane. */
   lv_area_t* icons = s_boxes + MAX_TRACKS;
-  Track* icon_of[MAX_TRACKS];
+  Track* icon_of[MAX_TRACKS + LABEL_OBSTACLES];
   int ni = 0;
   for (auto& t : tracks()) {
     if (!t.used || !t.alive || t.rim) continue;
     float h = AIRCRAFT_ICONS[t.f.icon < ICON_COUNT ? t.f.icon : 0].side * 0.4f;
     icons[ni] = {(lv_coord_t)(t.px - h), (lv_coord_t)(t.py - h), (lv_coord_t)(t.px + h), (lv_coord_t)(t.py + h)};
     icon_of[ni++] = &t;
+  }
+  /* ...and the compass letters and ring distances, so tags don't cover them */
+  for (int i = 0; i < 8; i++) {
+    bool major = (i & 1) == 0;
+    float x, y;
+    edge_point(0, 0, i * 45.0f, major ? 11.0f : (s_rect ? 14.0f : 16.0f), &x, &y);
+    icons[ni] = label_box(CARDINALS[i], major ? &fs_text_16 : &fs_text_12, x, y);
+    icon_of[ni++] = nullptr;
+  }
+  const int rings = s_rect ? (int)(s_reach / (s_r / (float)RING_COUNT)) : RING_COUNT;
+  for (int k = 1; k <= rings && k <= LABEL_OBSTACLES - 8; k++) {
+    char buf[16];
+    range_label(k, buf, sizeof(buf));
+    float x, y;
+    fx_polar(0, 0, s_r * k / (float)RING_COUNT - 9.0f, RANGE_LABEL_BEARING, &x, &y);
+    icons[ni] = label_box(buf, &fs_text_12, x, y);
+    icon_of[ni++] = nullptr;
   }
   int limit = g_cfg.labels == LABELS_NEAREST ? 8 : n;
   lv_area_t* placed = s_boxes;
@@ -829,7 +865,7 @@ static void draw_grid(Fx& f, lv_draw_ctx_t* dc, float acx, float acy) {
   draw_dashed_line(f, acx, acy - ry, acx, acy + ry, p.accent, (uint8_t)(opa * 0.75f));
 
   /* compass labels, just inside the rim (or the screen's edge) */
-  static const char* const card[8] = {"N", "NE", "E", "SE", "S", "SW", "W", "NW"};
+  const char* const* card = CARDINALS;
   for (int i = 0; i < 8; i++) {
     bool major = (i & 1) == 0;
     float x, y;
@@ -838,12 +874,8 @@ static void draw_grid(Fx& f, lv_draw_ctx_t* dc, float acx, float acy) {
   }
   /* range labels on each ring (Pi: SCALE_LABEL_BEARING_DEG) */
   for (int k = 1; k <= rings; k++) {
-    float v = dist_from_nm(s_range_disp * k / RING_COUNT);
     char buf[16];
-    if (v >= 10)
-      snprintf(buf, sizeof(buf), "%d%s", (int)lroundf(v), dist_unit());
-    else
-      snprintf(buf, sizeof(buf), "%.1f%s", v, dist_unit());
+    range_label(k, buf, sizeof(buf));
     float x, y;
     fx_polar(acx, acy, s_r * k / (float)RING_COUNT - 9.0f, RANGE_LABEL_BEARING, &x, &y);
     if (s_rect && !on_radar(x - acx, y - acy, 12.0f)) continue; /* that ring's label is off screen */
@@ -1011,7 +1043,7 @@ lv_obj_t* radar_create_full(lv_obj_t* parent, int x, int y, int w, int h) {
 static lv_obj_t* create_common(lv_obj_t* parent, int x, int y, int w, int h) {
   build_trail_lut();
   if (!s_tracks) s_tracks = (Track*)calloc(MAX_TRACKS, sizeof(Track));
-  if (!s_boxes) s_boxes = (lv_area_t*)calloc(2 * MAX_TRACKS, sizeof(lv_area_t));
+  if (!s_boxes) s_boxes = (lv_area_t*)calloc(2 * MAX_TRACKS + LABEL_OBSTACLES, sizeof(lv_area_t));
   s_obj = lv_obj_create(parent);
   lv_obj_remove_style_all(s_obj);
   lv_obj_set_pos(s_obj, x, y);

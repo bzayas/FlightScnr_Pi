@@ -419,9 +419,10 @@ static void show_notice(const Notice& n) {
   lv_obj_set_flex_flow(col_box, LV_FLEX_FLOW_COLUMN);
   lv_obj_clear_flag(col_box, LV_OBJ_FLAG_CLICKABLE);
   w_label(col_box, n.title, cp ? &fs_text_14 : &fs_text_16, &ST_TEXT);
-  lv_obj_t* body = w_label(col_box, n.body, cp ? &fs_text_12 : &fs_text_14, &ST_TEXT2);
-  lv_label_set_long_mode(body, LV_LABEL_LONG_DOT);
-  lv_obj_set_width(body, LV_PCT(100));
+  const lv_font_t* bf = cp ? &fs_text_12 : &fs_text_14;
+  lv_obj_t* body = w_label(col_box, n.body, bf, &ST_TEXT2);
+  lv_label_set_long_mode(body, LV_LABEL_LONG_DOT); /* one line; an orphaned "mi" on a third looks broken */
+  lv_obj_set_size(body, LV_PCT(100), bf->line_height);
   lv_anim_t a;
   lv_anim_init(&a);
   lv_anim_set_var(&a, b);

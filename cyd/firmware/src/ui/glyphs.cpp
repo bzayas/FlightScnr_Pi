@@ -68,21 +68,31 @@ static void drops(Fx& f, float cx, float top, float S, int n, float len, lv_colo
   }
 }
 
+/* One lightning bolt: a slanted upper bar, a step to the right, a point.
+ * fx fills convex shapes, so it's two pieces that overlap at the step. */
 static void bolt(Fx& f, float cx, float cy, float S, lv_color_t c, uint8_t opa) {
-  const float a[] = {cx + 0.07f * S, cy + 0.00f * S, cx - 0.11f * S, cy + 0.24f * S,
-                     cx + 0.00f * S, cy + 0.24f * S, cx + 0.09f * S, cy + 0.06f * S};
-  const float b[] = {cx + 0.03f * S, cy + 0.18f * S, cx + 0.11f * S, cy + 0.18f * S,
-                     cx - 0.07f * S, cy + 0.44f * S, cx - 0.04f * S, cy + 0.27f * S};
+  /* unit box: x 0..1 across 0.26 S, y 0..1 down 0.44 S */
+  static const float A[] = {0.55f, 0.00f, 0.85f, 0.00f, 0.55f, 0.42f, 0.15f, 0.58f};
+  static const float B[] = {0.45f, 0.42f, 0.85f, 0.42f, 0.30f, 1.00f};
+  float a[8], b[6];
+  for (int i = 0; i < 4; i++) {
+    a[2 * i] = cx + (A[2 * i] - 0.5f) * 0.26f * S;
+    a[2 * i + 1] = cy + A[2 * i + 1] * 0.44f * S;
+  }
+  for (int i = 0; i < 3; i++) {
+    b[2 * i] = cx + (B[2 * i] - 0.5f) * 0.26f * S;
+    b[2 * i + 1] = cy + B[2 * i + 1] * 0.44f * S;
+  }
   fx_polygon(f, a, 4, c, opa);
-  fx_polygon(f, b, 4, c, opa);
+  fx_polygon(f, b, 3, c, opa);
 }
 
 void glyph_weather(Fx& f, uint8_t cond, bool night, float cx, float cy, float S, lv_color_t bg, uint8_t opa) {
   const Palette& p = pal();
   switch (cond) {
     case WXC_CLEAR:
-      if (night)
-        crescent(f, cx, cy, S * 0.30f, p.moon_lit, bg, opa);
+      if (night) /* the same visual size as the sun */
+        crescent(f, cx, cy, S * 0.36f, p.moon_lit, bg, opa);
       else
         sun(f, cx, cy, S * 0.20f, p.sun, opa, true);
       break;
@@ -90,6 +100,13 @@ void glyph_weather(Fx& f, uint8_t cond, bool night, float cx, float cy, float S,
     case WXC_PARTLY_CLOUDY:
     case WXC_MOSTLY_CLOUDY: {
       float k = cond == WXC_MOSTLY_CLEAR ? 0.0f : (cond == WXC_PARTLY_CLOUDY ? 0.5f : 1.0f);
+      /* centre the sun-and-cloud pair as a whole (measured in the gallery) */
+      if (night) {
+        cx += S * 0.023f * k;
+      } else {
+        cx -= S * (0.070f - 0.070f * k);
+        cy += S * (0.062f - 0.023f * k);
+      }
       float sr = S * (0.19f - 0.05f * k);
       float sx = cx + S * (0.08f + 0.10f * k), sy = cy - S * (0.09f + 0.07f * k);
       if (night)
@@ -180,13 +197,19 @@ void glyph_moon(Fx& f, float phase, float cx, float cy, float r, uint8_t opa) {
   }
 }
 
+/* Half a sun on the horizon, with an arrow under it for sunrise (up) and
+ * sunset (down). The drawing is centred on its ink; under 20 px the
+ * diagonal rays go, so the shape stays readable. */
 static void horizon_sun(Fx& f, float cx, float cy, float S, const GlyphArgs& a, int arrow) {
   const Palette& p = pal();
-  float yh = cy + S * 0.08f;
-  float r = S * 0.19f;
+  bool small = S < 20;
+  float r = S * (small ? 0.22f : 0.19f);
+  float yh = cy + S * (arrow ? 0.018f : 0.166f);
+  if (small) yh = cy + S * (arrow ? -0.02f : 0.12f);
   fx_disc(f, cx, yh, r, p.sun, a.opa);
   float w = fmaxf(0.7f, r * 0.15f);
   for (int i = -2; i <= 2; i++) {
+    if (small && (i == -1 || i == 1)) continue;
     float x0, y0, x1, y1;
     fx_polar(cx, yh, r * 1.42f, i * 45.0f, &x0, &y0);
     fx_polar(cx, yh, r * 1.85f, i * 45.0f, &x1, &y1);
@@ -197,7 +220,7 @@ static void horizon_sun(Fx& f, float cx, float cy, float S, const GlyphArgs& a, 
   float hr = fmaxf(0.8f, S * 0.03f);
   fx_capsule(f, cx - S * 0.40f, yh, cx + S * 0.40f, yh, hr, a.tint, a.opa);
   if (arrow) {
-    float ay = yh + S * 0.24f, aw = S * 0.09f, ah = S * 0.06f * arrow;
+    float ay = yh + S * 0.24f, aw = S * (small ? 0.12f : 0.09f), ah = S * (small ? 0.08f : 0.06f) * arrow;
     fx_capsule(f, cx - aw, ay + ah, cx, ay - ah, hr, p.sun, a.opa);
     fx_capsule(f, cx, ay - ah, cx + aw, ay + ah, hr, p.sun, a.opa);
   }

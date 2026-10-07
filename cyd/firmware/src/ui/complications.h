@@ -47,6 +47,7 @@ struct CompData {
   char title[20];
   char value[20];
   char unit[8];
+  char vshort[12];   /* shorter value for tight slots ("39k"); empty = none */
   char line2[44];
   char line3[44];
   float gauge;       /* 0..1, NAN = none */
@@ -55,6 +56,7 @@ struct CompData {
   char lo[8], hi[8];
   uint8_t custom;
   bool numeric;      /* value is digits only (use the numeral fonts) */
+  bool ampm;         /* unit is AM/PM: circles leave it out */
 };
 
 typedef void (*CompTapCb)(uint8_t comp);
@@ -74,5 +76,15 @@ void comp_draw_solar(lv_draw_ctx_t* dc, int x, int y, int w, int h, bool labels)
 void comp_draw_hourly(lv_draw_ctx_t* dc, int x, int y, int w, int h);
 void comp_draw_gauge(lv_draw_ctx_t* dc, uint8_t comp, float cx, float cy, float r);
 
-/* Draw a complication into an arbitrary area (editor previews). */
-void comp_draw_preview(lv_draw_ctx_t* dc, uint8_t comp, uint8_t family, const lv_area_t& area);
+/* Text placed by its ink (see complications.cpp): on a baseline; cut to
+ * max_w with an ellipsis; width; height of capitals and figures. */
+void comp_text_base(lv_draw_ctx_t* dc, const char* s, const lv_font_t* f, lv_color_t c, int x, int base,
+                    lv_text_align_t al);
+void comp_text_fit(lv_draw_ctx_t* dc, const char* s, const lv_font_t* f, lv_color_t c, int x, int base, int max_w,
+                   lv_text_align_t al);
+int comp_text_w(const char* s, const lv_font_t* f);
+int comp_font_cap(const lv_font_t* f);
+
+/* Draw a complication into an arbitrary area (editor previews; the
+ * simulator's gallery). `corner` picks the alignment of corner widgets. */
+void comp_draw_preview(lv_draw_ctx_t* dc, uint8_t comp, uint8_t family, const lv_area_t& area, uint8_t corner = 0);

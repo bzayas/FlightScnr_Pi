@@ -164,11 +164,15 @@ static void body_draw(lv_event_t* e) {
         if (tot > 1) prog = (float)fmin(1.0, fmax(0.0, done / tot));
       }
       float bx0 = x + 14, bx1 = a.x2 - 14, by = y + mm.bar_dy;
+      /* the plane travels between the end markers, never past the card's padding */
+      const float ps = 0.36f, half = 56 * ps * 0.5f;
+      float px = bx0 + half + (bx1 - bx0 - 2 * half) * prog;
       fx_capsule(f, bx0, by, bx1, by, 1.6f, p.sep, 255);
-      fx_capsule(f, bx0, by, bx0 + (bx1 - bx0) * prog, by, 1.6f, p.blue, 255);
+      fx_capsule(f, bx0, by, px, by, 1.6f, p.blue, 255);
       fx_disc(f, bx0, by, 3.5f, p.blue, 255);
       fx_ring(f, bx1, by, 3.0f, 1.0f, p.text3, 255);
-      fx_mask(f, PLANE_GLYPH_56, 56, bx0 + (bx1 - bx0) * prog, by, 90, 0.36f, p.blue, 255);
+      fx_disc(f, px, by, half * 0.8f, p.bg, 255); /* a clear space round the plane */
+      fx_mask(f, PLANE_GLYPH_56, 56, px, by, 90, ps, p.blue, 255);
     } else {
       bool waiting = rs == ROUTE_PENDING && g_https_wait_ms && plat_millis() - g_https_wait_ms < 6000;
       t(dc, rs == ROUTE_PENDING ? "Looking up route\xE2\x80\xA6" : "Route not available", &fs_text_16, p.text2,
@@ -201,14 +205,21 @@ static void body_draw(lv_event_t* e) {
     snprintf(v, sizeof(v), "\xE2\x80\x94");
   cell(dc, cx(ci), cy(ci), "HEADING", v, "", p.text);
   if (!isnan(fl.track)) {
-    const float rr = cp ? 12.0f : 16.0f;
-    float ccx = cx(ci) + cw - rr - (cp ? 6 : 10), ccy = cy(ci) + (cp ? 22 : 26);
+    /* a small compass just after the heading, centred on its figures */
+    const float rr = cp ? 9.0f : 12.0f;
+    lv_point_t vs;
+    lv_txt_get_size(&vs, v, mm.val_font, 0, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
+    const lv_font_t* vf = mm.val_font;
+    int base = vf->line_height - vf->base_line;
+    lv_font_glyph_dsc_t g;
+    int top = lv_font_get_glyph_dsc(vf, &g, '1', 0) ? base - (g.box_h + g.ofs_y) : base * 3 / 10;
+    float ccx = cx(ci) + vs.x + 8 + rr, ccy = cy(ci) + mm.val_dy + (top + base) / 2.0f;
     fx_ring(f, ccx, ccy, rr, 0.8f, p.text3, 255);
     float hx, hy, tx2, ty2;
     fx_polar(ccx, ccy, rr - 3, fl.track, &hx, &hy);
     fx_polar(ccx, ccy, rr - 3, fl.track + 180, &tx2, &ty2);
     fx_capsule(f, tx2, ty2, hx, hy, 1.0f, p.text2, 255);
-    fx_disc(f, hx, hy, 2.8f, p.orange, 255);
+    fx_disc(f, hx, hy, rr * 0.23f, p.orange, 255);
   }
   double dn = geo_dist_nm(g_cfg.lat, g_cfg.lon, fl.lat, fl.lon);
   fmt_dist((float)dn, v, sizeof(v));

@@ -71,7 +71,9 @@ void fmt_alt_short(int32_t ft, char* out, size_t n) {
     return;
   }
   float v = g_cfg.u_alt == ALT_M ? ft * 0.3048f : (float)ft;
-  if (v >= 1000)
+  if (v >= 9950)
+    snprintf(out, n, "%.0fk", v / 1000.0f);
+  else if (v >= 1000)
     snprintf(out, n, "%.1fk", v / 1000.0f);
   else
     snprintf(out, n, "%d", (int)v);
