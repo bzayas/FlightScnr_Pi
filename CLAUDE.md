@@ -70,3 +70,23 @@ Two processes, one shared data directory:
 ### Versioning
 
 `VERSION` at repo root holds `year.month.day.iteration` (e.g. `2026.8.26.2`). Devices self-update by `git pull --ff-only` via the portal (`setup/portal-update.sh`) — this is why file modes and history on `main` must stay pull-friendly.
+
+## FlightScnr CYD (`cyd/`)
+
+This fork's front page is FlightScnr CYD, a port to the ESP32 "Cheap Yellow Display" (2.8″ ESP32-2432S028R, its two-USB ST7789 twin, and the 4.0″ E32R40T). The Pi app above is unchanged; its README is `FLIGHTSCNR_PI.md`. The user guide is `docs/cyd/` (developer notes: `docs/cyd/development.md`).
+
+```bash
+cd cyd/firmware
+pio run -e cyd-e32r40t                     # firmware (one image for every board)
+make -C sim -j && sim/build/fs_sim [--small] [--landscape] --out shots   # simulator; exits non-zero if swipe/settings checks fail
+make -C sim check                          # installer schema (cyd/installer/js/schema.js) matches src/core/config.cpp
+make -C test/fetch check                   # HTTP/HTTPS client tests
+python3 tools/build_portal.py [--check]    # re-embed cyd/installer as the device portal after editing it
+python3 tools/make_gallery.py shots        # regenerate installer + guide screenshots from all four sim sizes
+```
+
+- ESP32 without PSRAM: memory is the main constraint. HTTPS is BearSSL in a static block (`src/net/fetch.cpp`); the net task runs on core 0 at priority 1; Traffic and Settings are drawn lists built on demand.
+- Settings JSON lives in the `fscfg` partition (`0x3D0000`). Never move partition offsets, and keep stored JSON keys stable (layout keys `infograph`/`modular`/`focus`/`full` are shown as Instruments/Panels/Focus/Full screen).
+- The boot safety disclaimer rule applies to the CYD too (`src/ui/screens/boot.cpp`).
+- Version in `cyd/VERSION`, tags `cyd-v<version>`. CYD CI (`.github/workflows/cyd.yml`) must never create GitHub Releases, and CYD builds must never use `scripts/release.sh`.
+- Update `docs/cyd/` and `cyd/CHANGELOG.md` with user-visible changes.

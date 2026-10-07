@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <!-- SPDX-License-Identifier: CC-BY-NC-SA-4.0 · FlightScnr (Yash Mulgaonkar) -->
+  <defs>
+    <linearGradient id="g" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#1c2b1c"/>
+      <stop offset="1" stop-color="#050805"/>
+    </linearGradient>
+    <linearGradient id="s" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#00ff00" stop-opacity="0"/>
+      <stop offset="1" stop-color="#00ff00" stop-opacity=".55"/>
+    </linearGradient>
+  </defs>
+  <rect width="64" height="64" rx="14" fill="url(#g)"/>
+  <circle cx="32" cy="32" r="23" fill="none" stroke="#00ff00" stroke-width="2" stroke-dasharray="4 3" opacity=".8"/>
+  <circle cx="32" cy="32" r="12" fill="none" stroke="#00ff00" stroke-width="1.5" stroke-dasharray="3 3" opacity=".55"/>
+  <path d="M32 32 L32 9 A23 23 0 0 1 51.9 20.5 Z" fill="url(#s)"/>
+  <path transform="translate(39 22) rotate(40) scale(.95)" fill="#ff9f0a" d="M0-9 1.9-2 9 2v2l-7.1-2 -.4 5 2.4 2v1.4L0 9.2l-3.9 1.2V9l2.4-2-.4-5L-9 4V2l7.1-4z"/>
+</svg>

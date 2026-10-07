@@ -1,0 +1,13 @@
+{
+  "name": "bearssl",
+  "version": "0.6.0",
+  "description": "BearSSL 0.6 by Thomas Pornin (https://bearssl.org), vendored unmodified. MIT licence: see LICENSE.txt.",
+  "license": "MIT",
+  "frameworks": "*",
+  "platforms": "*",
+  "build": {
+    "srcDir": "src",
+    "includeDir": "inc",
+    "flags": ["-Isrc", "-O2", "-w"]
+  }
+}
