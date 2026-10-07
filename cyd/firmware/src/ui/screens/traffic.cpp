@@ -188,6 +188,7 @@ lv_obj_t* traffic_create(lv_obj_t* parent) {
   s_gen = s_theme = 0;
   s_empty = w_label(s_page, "No aircraft in range right now.", &fs_text_16, &ST_TEXT2);
   lv_obj_set_style_pad_top(s_empty, 20, 0);
+  traffic_tick(); /* fill it now, not at the next second (no "No aircraft" flash) */
   return s_page;
 }
 

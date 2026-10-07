@@ -52,7 +52,7 @@ static const char* cal_key() {
 static void cal_load() {
   Preferences p;
   p.begin("fs_state", false); /* read-write: creates the namespace on a fresh board instead of logging an error */
-  size_t n = p.getBytes(cal_key(), &s_cal, sizeof(s_cal));
+  size_t n = p.isKey(cal_key()) ? p.getBytes(cal_key(), &s_cal, sizeof(s_cal)) : 0; /* no "NOT_FOUND" log line */
   p.end();
   if (n != sizeof(s_cal) || !s_cal.valid) {
     /* Typical orientation so the first screens are roughly usable; the
@@ -121,16 +121,21 @@ void plat_screen_to_native(int sx, int sy, float* nx, float* ny) {
   }
 }
 
-/* Resistive panels jitter and report phantom releases; smooth and debounce. */
+/* Resistive panels jitter and report phantom releases; smooth and debounce.
+ * A finger presses less firmly than a stylus, so during a drag the panel
+ * drops more samples: once the touch has moved, a short gap (100 ms) is
+ * bridged instead of ending the drag. Taps keep the quick 40 ms release. */
 static void touch_read_cb(lv_indev_drv_t*, lv_indev_data_t* data) {
-  static int32_t last_x, last_y;
+  static int32_t last_x, last_y, down_x, down_y;
   static float fx = -1, fy = -1;
   static uint8_t release_count;
+  static bool dragging;
   int rx, ry;
   if (plat_touch_raw(&rx, &ry)) {
     float nx = s_cal.a * rx + s_cal.b * ry + s_cal.c;
     float ny = s_cal.d * rx + s_cal.e * ry + s_cal.f;
-    if (fx < 0) {
+    const bool first = fx < 0; /* first sample of this touch */
+    if (first) {
       fx = nx;
       fy = ny;
     } else {
@@ -142,13 +147,21 @@ static void touch_read_cb(lv_indev_drv_t*, lv_indev_data_t* data) {
     native_to_screen((int32_t)lroundf(fx), (int32_t)lroundf(fy), &sx, &sy);
     last_x = constrain(sx, 0, display_width() - 1);
     last_y = constrain(sy, 0, display_height() - 1);
+    if (first) {
+      down_x = last_x;
+      down_y = last_y;
+      dragging = false;
+    } else if (abs(last_x - down_x) + abs(last_y - down_y) > 10) {
+      dragging = true;
+    }
     release_count = 0;
     data->state = LV_INDEV_STATE_PR;
-  } else if (release_count < 2 && fx >= 0) {
-    release_count++; /* ignore a single dropped sample mid-drag */
+  } else if (release_count < (dragging ? 5 : 2) && fx >= 0) {
+    release_count++; /* bridge dropped samples mid-touch */
     data->state = LV_INDEV_STATE_PR;
   } else {
     fx = fy = -1;
+    dragging = false;
     data->state = LV_INDEV_STATE_REL;
   }
   data->point.x = last_x;

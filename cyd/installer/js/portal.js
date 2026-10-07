@@ -124,9 +124,9 @@ class PortalUI extends SettingsUI {
         this.row('Restart', null, btn('Restart', act('reboot', 'Restarting…', 'Restart the display now?'))),
       ]),
       this.group('Danger zone', [
-        this.row('Factory reset', 'Erases Wi-Fi, location, keys, face and calibration. The display restarts into setup.', btn('Erase…', act('factory_reset', 'Erasing…', 'Erase all settings on this display? This can’t be undone.'), 'danger')),
+        this.row('Factory reset', 'Erases Wi-Fi, location, keys, scope layout and calibration. The display restarts into setup.', btn('Erase…', act('factory_reset', 'Erasing…', 'Erase all settings on this display? This can’t be undone.'), 'danger')),
       ], 'Firmware updates: open the FlightScnr CYD web installer on a computer, connect the display with USB and choose “Firmware only”. Your settings are kept.'),
-      h('p', { class: 'footnote muted' }, 'FlightScnr CYD is a port of FlightScnr Pi by Yash Mulgaonkar (github.com/yashmulgaonkar/FlightScnr_Pi), licensed CC BY-NC-SA 4.0. Personal, non-commercial use only. Not for safety-critical use.'),
+      h('p', { class: 'footnote muted' }, 'FlightScnr CYD (github.com/bzayas/FlightScnr_CYD) is a port of FlightScnr Pi by Yash Mulgaonkar (github.com/yashmulgaonkar/FlightScnr_Pi), licensed CC BY-NC-SA 4.0. Personal, non-commercial use only. Not for safety-critical use.'),
     ];
   }
 }

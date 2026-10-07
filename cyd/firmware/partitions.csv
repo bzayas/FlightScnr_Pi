@@ -3,8 +3,8 @@
 #
 # FlightScnr CYD flash map (4 MB). Keep offsets STABLE: the web installer
 # writes settings to `fscfg` and updates firmware without erasing NVS/fscfg.
-# One large app slot (Wi-Fi + Bluetooth Classic A2DP + LVGL do not fit two
-# OTA slots); firmware updates go through the web installer instead.
+# One large app slot rather than two OTA slots: firmware updates go through
+# the web installer, over USB.
 #
 # Name,   Type, SubType,  Offset,   Size
 nvs,      data, nvs,      0x9000,   0x5000,

@@ -58,7 +58,7 @@ static const Item ITEMS[] = {
     {ACCENT, K_ACCENT, SYM_PALETTE, T_PINK, "Accent", false},
     {DAY, K_SLIDER, SYM_SUN, T_ORANGE, "Day", false},
     {NIGHT, K_SLIDER, SYM_MOON, T_BLUE, "Night", false},
-    {FACE, K_VALUE, SYM_SLIDERS, T_PURPLE, "Face", true},
+    {FACE, K_VALUE, SYM_SLIDERS, T_PURPLE, "Scope", true},
     {ORIENT, K_VALUE, SYM_REFRESH, T_GRAY, "Orientation", false},
 
     {RANGE, K_VALUE, SYM_CROSSHAIR, T_GREEN, "Range", false},
@@ -544,7 +544,8 @@ static void open_about() {
   lv_obj_t* body = sheet_body(sh);
   char buf[420];
   snprintf(buf, sizeof(buf),
-           "FlightScnr CYD %s\n%s\n\n"
+           "FlightScnr CYD %s\n%s\n"
+           "github.com/bzayas/FlightScnr_CYD\n\n"
            "A port of FlightScnr Pi by Yash Mulgaonkar\n"
            "github.com/yashmulgaonkar/FlightScnr_Pi\n"
            "Licensed CC BY-NC-SA 4.0 - non-commercial use only.\n\n"

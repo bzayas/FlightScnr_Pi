@@ -55,7 +55,7 @@ const ICON_PATHS = {
   location: 'M12 21s-7-6.2-7-11.5A7 7 0 0 1 19 9.5C19 14.8 12 21 12 21zM12 12.2a2.6 2.6 0 1 0 0-5.2 2.6 2.6 0 0 0 0 5.2z',
   weather: 'M7 18h10a4 4 0 0 0 .6-7.95A6 6 0 0 0 6.1 11 3.5 3.5 0 0 0 7 18z',
   plane: 'M21 15.5v-1.8l-7.6-4.8V3.6a1.4 1.4 0 0 0-2.8 0v5.3L3 13.7v1.8l7.6-2.4v5.2l-2 1.5V21l3.4-1 3.4 1v-1.2l-2-1.5v-5.2z',
-  face: 'M8 3h8l1 3a7 7 0 0 1 0 12l-1 3H8l-1-3a7 7 0 0 1 0-12zM12 8v4l2.5 1.5',
+  face: 'M12 3a9 9 0 1 0 9 9M12 7.5a4.5 4.5 0 1 0 4.5 4.5M12 12l6.4-6.4',
   speaker: 'M4 9h4l5-4v14l-5-4H4zM16.5 8.5a5 5 0 0 1 0 7M19 6a8.5 8.5 0 0 1 0 12',
   bell: 'M18 16v-5a6 6 0 1 0-12 0v5l-2 2h16zM10 21h4',
   units: 'M4 6h16M4 12h10M4 18h6M17 15l3 3-3 3',
@@ -97,7 +97,7 @@ export const SECTIONS = [
   { id: 'location', title: 'Location', icon: 'location', color: 'var(--blue)' },
   { id: 'weather', title: 'Weather', icon: 'weather', color: 'var(--teal)' },
   { id: 'flights', title: 'Flights & Radar', icon: 'plane', color: 'var(--orange)' },
-  { id: 'face', title: 'Watch Face', icon: 'face', color: 'var(--indigo)' },
+  { id: 'face', title: 'Scope', icon: 'face', color: 'var(--indigo)' },
   { id: 'alerts', title: 'Alerts', icon: 'bell', color: 'var(--red)' },
   { id: 'units', title: 'Units', icon: 'units', color: 'var(--gray)' },
   { id: 'display', title: 'Display', icon: 'display', color: 'var(--yellow)' },
@@ -110,7 +110,7 @@ const NM_TO = { mi: 1.15078, km: 1.852, nm: 1 };
 const fmtRange = (nm, c) => `${Math.round(nm * NM_TO[distUnit(c)])} ${distUnit(c)}`;
 
 export class SettingsUI {
-  // api (portal only): { scanWifi(), btScan(), btResults(), action(name, extra) }
+  // api (portal only): { scanWifi(), action(name, extra) }
   constructor({ mode, cfg, onChange, api }) {
     this.mode = mode;
     this.cfg = cfg;
@@ -444,7 +444,7 @@ export class SettingsUI {
     );
 
     return [
-      this.header('Weather', 'Used for the weather complications and the Sky page. Open-Meteo works without any key, and Tomorrow.io adds more detail if you have a free key.'),
+      this.header('Weather', 'Used for the weather widgets and the Sky page. Open-Meteo works without any key, and Tomorrow.io adds more detail if you have a free key.'),
       this.group('Provider', [
         this.seg('Weather source', 'wx.provider', [
           { v: 'auto', t: 'Automatic' },
@@ -511,7 +511,7 @@ export class SettingsUI {
       urlWrap,
       this.group('Radar', [
         this.select('Range', 'radar.range', RANGES_NM.map((nm) => ({ v: nm, t: `${fmtRange(nm, c)}${nm === 15 ? ' (default)' : ''}` })), 'Tap the radar on the device to cycle ranges.'),
-        this.toggle('Sweep', 'radar.sweep', 'The rotating beam. Turn it off for a calmer face.'),
+        this.toggle('Sweep', 'radar.sweep', 'The rotating beam. Turn it off for a calmer scope.'),
         this.seg('Labels', 'radar.labels', [{ v: 'off', t: 'Off' }, { v: 'nearest', t: 'Nearest 8' }, { v: 'all', t: 'All' }], 'Labels never cover other aircraft; crowded ones are skipped.'),
         this.seg('Label lines', 'radar.tag_lines', [{ v: 1, t: 'Callsign' }, { v: 2, t: '+ Type' }, { v: 3, t: '+ Altitude' }]),
         this.seg('Aircraft colour', 'radar.plane_color', [{ v: 'theme', t: 'Theme' }, { v: 'altitude', t: 'By altitude' }]),
@@ -526,7 +526,7 @@ export class SettingsUI {
     ];
   }
 
-  /* ---- Watch face ---- */
+  /* ---- Scope (the home screen: radar + widgets) ---- */
 
   page_face() {
     const c = this.cfg;
@@ -537,7 +537,7 @@ export class SettingsUI {
     this._renderFace = render;
     render();
     return [
-      this.header('Watch Face', 'The radar is the face. Choose a layout, then tap any slot to pick its complication, just like an Apple Watch face.'),
+      this.header('Scope', 'The scope is the home screen: the live radar, framed by widgets for time, weather and traffic. Choose a layout, then tap any slot to pick its widget.'),
       this.group('Orientation', [
         this.select('Screen orientation', 'face.rotation', ROTATIONS.map((r) => ({ v: r.v, t: r.name })), this.portal ? 'Changing orientation restarts the device.' : 'Portrait suits the CYD best.', {
           onPick: (v) => {
@@ -615,7 +615,7 @@ export class SettingsUI {
 
     const rows = lay.slots.map((sd, i) => {
       const sel = h('select', {
-        'aria-label': `${sd.where} complication`,
+        'aria-label': `${sd.where} widget`,
         onfocus: () => {
           if (this.selSlot !== i) {
             this.selSlot = i;
@@ -656,8 +656,10 @@ export class SettingsUI {
         h('div', { class: 'card pad' }, cards),
         oc !== orientClass(c.face.rotation) && h('div', { class: 'footnote' }, 'You’re editing the other orientation. It’s used if you rotate the screen later.')),
       h('section', { class: 'group' },
-        h('div', { class: 'caption' }, 'Complications'),
-        h('div', { class: 'designer' }, h('div', { class: 'device' }, preview), h('div', {}, list, h('div', { class: 'footnote' }, lay.blurb, ' ', reset)))),
+        h('div', { class: 'caption' }, 'Widgets'),
+        h('div', { class: 'designer' }, h('div', { class: 'device' }, preview), h('div', {},
+          lay.slots.length ? list : h('div', { class: 'card pad muted' }, 'This layout has no widgets.'),
+          h('div', { class: 'footnote' }, lay.blurb, ' ', lay.slots.length ? reset : null)))),
     ];
   }
 
@@ -670,10 +672,10 @@ export class SettingsUI {
       this.group('Notify me about', [
         this.toggle('Emergencies', 'alerts.emergency', 'Squawk 7500, 7600 or 7700.'),
         this.toggle('Military aircraft', 'alerts.military'),
-        this.toggle('Watch list', 'alerts.watch_on', 'Any flight below, by callsign or registration.'),
+        this.toggle('Watch list', 'alerts.watch_on', 'Any flight below, by callsign, registration or type.'),
         this.toggle('Tracked flight', 'alerts.tracked', 'When your tracked flight comes into range.'),
       ]),
-      this.group('Watch list', [h('div', { class: 'row stack' }, this.chips('alerts.watch', 8))], 'Examples: UAL1, N123AB, BAW. Up to 8 entries.'),
+      this.group('Watch list', [h('div', { class: 'row stack' }, this.chips('alerts.watch', 8))], 'Callsigns (UAL1), registrations (N123AB) or aircraft type codes (B748, A388). Up to 8 entries.'),
       this.group('Tracked flight', [this.text('Callsign or registration', 'alerts.track', { mono: true, upper: true, placeholder: 'e.g. DAL501', max: 11, help: 'Followed even when it’s far away. Tap Track on any flight on the device to change it.' })]),
       this.group('Earthquakes', [
         this.toggle('Nearby earthquakes', 'alerts.quake'),
@@ -762,7 +764,7 @@ export async function testTomorrowKey(key, lat, lon) {
   }
 }
 
-/* ---- face preview -------------------------------------------------------- */
+/* ---- scope preview ------------------------------------------------------- */
 
 const SVG_FONT = '-apple-system, BlinkMacSystemFont, Inter, "Segoe UI", Roboto, sans-serif';
 
@@ -786,26 +788,32 @@ const SAMPLE = {
   fastest: ['512 mph', 'FASTEST'],
   tracked: ['DAL501', 'TRACKED'],
   quake: ['M3.4', 'QUAKE'],
-  audio: ['▶ KSFO', 'LIVEATC'],
   status: ['Online', 'STATUS'],
   none: ['', ''],
 };
 
-// SVG mock of a layout: radar disc + slot outlines with complication names.
+// SVG mock of a layout: the radar (a disc, or the whole screen for "Full
+// screen") + slot outlines with widget names.
 export function faceSvg(L, lay, slots, { scale = 0.5, accent = [0, 255, 0], sel = -1, onSlot, mini = false } = {}) {
   const W = L.w, H = L.h;
   const ac = `rgb(${accent.join(',')})`;
-  const r = lay.radar;
+  const full = lay.radar.r === 0;
+  const r = full ? { cx: W / 2, cy: H / 2, r: Math.min(W, H) / 2 - 4 } : lay.radar;
+  const reach = full ? Math.hypot(W / 2, H / 2) : r.r;
   const svg = h('svg', { viewBox: `0 0 ${W} ${H}`, width: Math.round(W * scale), height: Math.round(H * scale), role: 'img', 'aria-label': `${lay.name} layout preview` });
   svg.append(h('rect', { x: 0, y: 0, width: W, height: H, fill: '#000' }));
   const g = h('g', { opacity: 0.9 });
-  g.append(h('circle', { cx: r.cx, cy: r.cy, r: r.r, fill: '#020a02', stroke: ac, 'stroke-width': 1.5, 'stroke-dasharray': '6 5', opacity: 0.8 }));
-  for (const f of [1 / 3, 2 / 3]) g.append(h('circle', { cx: r.cx, cy: r.cy, r: r.r * f, fill: 'none', stroke: ac, 'stroke-width': 1, 'stroke-dasharray': '5 6', opacity: 0.55 }));
-  g.append(h('line', { x1: r.cx - r.r, y1: r.cy, x2: r.cx + r.r, y2: r.cy, stroke: ac, 'stroke-dasharray': '5 6', opacity: 0.4 }));
-  g.append(h('line', { x1: r.cx, y1: r.cy - r.r, x2: r.cx, y2: r.cy + r.r, stroke: ac, 'stroke-dasharray': '5 6', opacity: 0.4 }));
+  if (full) g.append(h('rect', { x: 0, y: 0, width: W, height: H, fill: '#020a02' }));
+  else g.append(h('circle', { cx: r.cx, cy: r.cy, r: r.r, fill: '#020a02', stroke: ac, 'stroke-width': 1.5, 'stroke-dasharray': '6 5', opacity: 0.8 }));
+  for (let k = 1; r.r * k / 3 < reach; k++)
+    if (full || k < 3) g.append(h('circle', { cx: r.cx, cy: r.cy, r: (r.r * k) / 3, fill: 'none', stroke: ac, 'stroke-width': 1, 'stroke-dasharray': '5 6', opacity: 0.55 }));
+  const hx = full ? W / 2 : r.r, hy = full ? H / 2 : r.r;
+  g.append(h('line', { x1: r.cx - hx, y1: r.cy, x2: r.cx + hx, y2: r.cy, stroke: ac, 'stroke-dasharray': '5 6', opacity: 0.4 }));
+  g.append(h('line', { x1: r.cx, y1: r.cy - hy, x2: r.cx, y2: r.cy + hy, stroke: ac, 'stroke-dasharray': '5 6', opacity: 0.4 }));
   const a0 = -Math.PI / 2 + 0.9;
-  g.append(h('path', { d: `M${r.cx},${r.cy} L${r.cx + r.r * Math.cos(a0 - 0.5)},${r.cy + r.r * Math.sin(a0 - 0.5)} A${r.r},${r.r} 0 0 1 ${r.cx + r.r * Math.cos(a0)},${r.cy + r.r * Math.sin(a0)} Z`, fill: ac, opacity: 0.22 }));
+  g.append(h('path', { d: `M${r.cx},${r.cy} L${r.cx + reach * Math.cos(a0 - 0.5)},${r.cy + reach * Math.sin(a0 - 0.5)} A${reach},${reach} 0 0 1 ${r.cx + reach * Math.cos(a0)},${r.cy + reach * Math.sin(a0)} Z`, fill: ac, opacity: 0.22 }));
   const planes = [[0.35, -0.42], [-0.5, -0.1], [0.15, 0.25], [-0.2, 0.55], [0.6, 0.18], [-0.05, -0.7]];
+  if (full) planes.push([-0.75, -1.1], [0.8, 1.05], [0.85, -0.95]);
   for (const [dx, dy] of planes)
     g.append(h('path', { d: 'M0,-7 L1.6,-1.5 L7,1.5 L7,3 L1.6,1.6 L1.2,5 L3,6.5 L3,7.5 L0,6.6 L-3,7.5 L-3,6.5 L-1.2,5 L-1.6,1.6 L-7,3 L-7,1.5 L-1.6,-1.5 Z', fill: '#ff9f0a', transform: `translate(${r.cx + dx * r.r},${r.cy + dy * r.r}) rotate(${(dx * 300) | 0}) scale(1.3)` }));
   svg.append(g);

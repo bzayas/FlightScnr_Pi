@@ -642,7 +642,7 @@ static void txt_fit(lv_draw_ctx_t* dc, const char* s, const lv_font_t* f, lv_col
   txt(dc, buf, f, c, 255, x, y, LV_TEXT_ALIGN_LEFT);
 }
 
-/* Value text with an Apple-style vertical roll when it changes. */
+/* Value text with a vertical roll when it changes. */
 static void value_txt(lv_draw_ctx_t* dc, Slot* s, const char* now_s, const char* prev_s, const lv_font_t* f,
                       lv_color_t c, int x, int y, lv_text_align_t al) {
   if (!s || s->anim >= 1024 || !prev_s[0] || strcmp(now_s, prev_s) == 0) {
@@ -742,7 +742,7 @@ static void gauge_stops(uint8_t style, const CompData& d, lv_color_t* stops, int
   }
 }
 
-/* Gauge along an arc (circular complications and corner bezels). */
+/* Gauge along an arc (circular widgets and corner bezels). */
 static void draw_gauge_arc(Fx& f, float cx, float cy, float r, float hw, float a0, float span, const CompData& d) {
   const Palette& p = pal();
   fx_arc(f, cx, cy, r, hw, a0, a0 + span, p.text3, 90, true);
@@ -923,7 +923,7 @@ static void render_large(Fx& f, lv_draw_ctx_t* dc, Slot* s, const CompData& d, c
   const Palette& p = pal();
   int w = lv_area_get_width(&a), h = lv_area_get_height(&a);
   if (d.custom == CUSTOM_BIGTIME) {
-    /* Apple-style hero time: big numerals, small AM/PM, date underneath */
+    /* hero time: big numerals, small AM/PM, date underneath */
     int dateh = h >= 70 ? fs_text_16.line_height : fs_text_14.line_height;
     int ap_w = d.unit[0] ? text_w(d.unit, &fs_text_16) + 6 : 0;
     const lv_font_t* tf = fit_font(d.value, true, w - ap_w - 2, h - dateh - 2);
@@ -1104,7 +1104,7 @@ static void render_corner(Fx& f, lv_draw_ctx_t* dc, Slot* s, const CompData& d, 
   uint8_t c = s ? s->def.corner : CORNER_TL;
   bool right = c == CORNER_TR || c == CORNER_BR;
   bool bottom = c == CORNER_BL || c == CORNER_BR;
-  /* gauge hugging the radar rim, Infograph style */
+  /* gauge hugging the radar rim (Instruments corner slots) */
   if (s && s->rr > 0) {
     float cb = corner_bearing(c);
     bool g = !isnan(d.gauge) || !isnan(d.mark);

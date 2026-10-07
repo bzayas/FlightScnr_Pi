@@ -10,8 +10,8 @@
  */
 
 /*
- * FlightScnr CYD - a flight radar "watch face" for the 4.0" ESP32 Cheap
- * Yellow Display. Port of FlightScnr Pi by Yash Mulgaonkar
+ * FlightScnr CYD - a live flight radar for the ESP32 "Cheap Yellow Display"
+ * (2.8" ESP32-2432S028R and 4.0" E32R40T). Port of FlightScnr Pi by Yash Mulgaonkar
  * (https://github.com/yashmulgaonkar/FlightScnr_Pi), CC BY-NC-SA 4.0.
  * Non-commercial use only.
  *

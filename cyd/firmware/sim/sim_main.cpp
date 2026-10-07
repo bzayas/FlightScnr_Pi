@@ -52,6 +52,7 @@ static lv_color_t* s_buf2;
 static uint64_t s_flushed_px;
 static uint32_t s_frames;
 static const char* s_out = "shots";
+static int s_shot_fails; /* screenshots that couldn't be written */
 static const char* s_prefix = "p";
 
 static struct {
@@ -112,7 +113,11 @@ static void shot(const char* name) {
   char path[256];
   snprintf(path, sizeof(path), "%s/%s_%s.ppm", s_out, s_prefix, name);
   FILE* f = fopen(path, "wb");
-  if (!f) return;
+  if (!f) {
+    fprintf(stderr, "  can't write %s\n", path);
+    s_shot_fails++;
+    return;
+  }
   fprintf(f, "P6\n%d %d\n255\n", W, H);
   for (int i = 0; i < W * H; i++) {
     lv_color_t c;
@@ -179,7 +184,7 @@ static int check_swipes() {
   run(300);
   int y = H / 2, step = W / 6;
   swipe(W * 2 / 3, -W / 20, y);
-  expect("a nudge leaves the face where it is", PAGE_FACE);
+  expect("a nudge leaves the scope where it is", PAGE_FACE);
   swipe(W * 2 / 3, -step, y);
   expect("a short swipe left goes to Traffic", PAGE_TRAFFIC);
   swipe(W * 2 / 3, -step, y);
@@ -481,7 +486,7 @@ int main(int argc, char** argv) {
   shot("01_disclaimer");
   tap_label("ACCEPT");
   run(1500);
-  shot("02_face_infograph_night");
+  shot("02_scope_instruments_night");
 
   /* SPI budget: pixels pushed per frame with the sweep running */
   s_flushed_px = 0;
@@ -494,21 +499,25 @@ int main(int argc, char** argv) {
   /* daytime: auto theme fades to the light palette */
   g_sim_epoch = utc_from_civil(2026, 10, 7, 0, 25, 0) - (g_sim_ms - 1000) / 1000;
   run(12000); /* sun check is cached for 10 s, then a 1.5 s crossfade */
-  shot("03_face_infograph_day");
+  shot("03_scope_instruments_day");
 
   for (int l = 1; l < LAYOUT_COUNT; l++) {
-    nav_post_patch("{\"face\":{\"layout\":{\"%s\":\"%s\"}}}", landscape ? "l" : "p", l == 1 ? "modular" : "focus");
+    nav_post_patch("{\"face\":{\"layout\":{\"%s\":\"%s\"}}}", landscape ? "l" : "p", layout_key((LayoutId)l));
     run(1200);
     char name[48];
-    snprintf(name, sizeof(name), "04_face_%s_day", l == 1 ? "modular" : "focus");
+    static const char* const shown[LAYOUT_COUNT] = {"instruments", "panels", "focus", "full"};
+    snprintf(name, sizeof(name), "04_scope_%s_day", shown[l]);
     shot(name);
   }
   nav_post_patch("{\"face\":{\"theme\":\"dark\"}}");
   run(2200);
-  shot("05_face_focus_night");
+  shot("05_scope_full_night");
+  nav_post_patch("{\"face\":{\"layout\":{\"%s\":\"focus\"}}}", landscape ? "l" : "p");
+  run(1200);
+  shot("05_scope_focus_night");
   nav_post_patch("{\"face\":{\"layout\":{\"%s\":\"modular\"}}}", landscape ? "l" : "p");
   run(1200);
-  shot("06_face_modular_night");
+  shot("06_scope_panels_night");
   nav_post_patch("{\"face\":{\"layout\":{\"%s\":\"infograph\"},\"theme\":\"auto\"}}", landscape ? "l" : "p");
   run(2400);
 
@@ -547,7 +556,7 @@ int main(int argc, char** argv) {
 
   face_editor_open();
   run(900);
-  shot("11_editor");
+  shot("11_scope_editor");
   face_editor_close();
   run(600);
 
@@ -594,6 +603,8 @@ int main(int argc, char** argv) {
   ui_start_calibration();
   run(800);
   shot("16_calibration");
-  printf(swipe_fails ? "done, %d swipe checks FAILED\n" : "done\n", swipe_fails);
-  return swipe_fails ? 1 : 0;
+  if (swipe_fails) printf("%d swipe/settings checks FAILED\n", swipe_fails);
+  if (s_shot_fails) printf("%d screenshots could not be written to %s\n", s_shot_fails, s_out);
+  if (!swipe_fails && !s_shot_fails) printf("done\n");
+  return swipe_fails || s_shot_fails ? 1 : 0;
 }

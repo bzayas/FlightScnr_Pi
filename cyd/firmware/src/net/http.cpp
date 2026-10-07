@@ -33,7 +33,7 @@
 #include "fetch.h"
 #include "hal/diag.h"
 
-#define USER_AGENT "FlightScnr-CYD/" FS_VERSION " (+https://github.com/yashmulgaonkar/FlightScnr_Pi)"
+#define USER_AGENT "FlightScnr-CYD/" FS_VERSION " (+https://github.com/bzayas/FlightScnr_CYD)"
 
 volatile uint32_t g_http_retry_after_s;
 static uint32_t s_tls_full, s_tls_resumed, s_tls_legacy;

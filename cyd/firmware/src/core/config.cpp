@@ -31,7 +31,7 @@ static const char* const COMP_KEYS[COMP_COUNT] = {
     "sunrise",  "sunset",   "daylight", "moon",     "wind",       "humidity", "uv",
     "aircraft", "nearest",  "highest",  "fastest",  "tracked",    "quake",    "status",
 };
-static const char* const LAYOUT_KEYS[LAYOUT_COUNT] = {"infograph", "modular", "focus"};
+static const char* const LAYOUT_KEYS[LAYOUT_COUNT] = {"infograph", "modular", "focus", "full"};
 static const char* const SOURCE_KEYS[SRC_COUNT] = {"", "adsbfi", "airplaneslive", "adsblol", "dump1090"};
 static const char* const SOURCE_NAMES[SRC_COUNT] = {"", "adsb.fi", "airplanes.live", "adsb.lol", "Local ADS-B"};
 
@@ -47,7 +47,7 @@ LayoutId layout_from_key(const char* key) {
   if (key)
     for (int i = 0; i < LAYOUT_COUNT; i++)
       if (strcmp(key, LAYOUT_KEYS[i]) == 0) return (LayoutId)i;
-  return LAYOUT_INFOGRAPH;
+  return LAYOUT_INSTRUMENTS;
 }
 const char* source_key(uint8_t s) { return s < SRC_COUNT ? SOURCE_KEYS[s] : ""; }
 const char* source_name(uint8_t s) { return s < SRC_COUNT ? SOURCE_NAMES[s] : ""; }
@@ -67,11 +67,11 @@ void face_default_slots(uint8_t out[2][LAYOUT_COUNT][FACE_MAX_SLOTS]) {
   const uint8_t l_inf[] = {COMP_TIME, COMP_WEATHER, COMP_TEMP_RANGE, COMP_AIRCRAFT, COMP_SUNRISE, COMP_SUNSET};
   const uint8_t l_mod[] = {COMP_TIME, COMP_SUN, COMP_NEAREST, COMP_WEATHER, COMP_AIRCRAFT};
   const uint8_t l_foc[] = {COMP_TIME, COMP_WEATHER, COMP_SUNRISE, COMP_SUNSET, COMP_AIRCRAFT, COMP_WIND};
-  memcpy(out[ORIENT_PORTRAIT][LAYOUT_INFOGRAPH], p_inf, sizeof(p_inf));
-  memcpy(out[ORIENT_PORTRAIT][LAYOUT_MODULAR], p_mod, sizeof(p_mod));
+  memcpy(out[ORIENT_PORTRAIT][LAYOUT_INSTRUMENTS], p_inf, sizeof(p_inf));
+  memcpy(out[ORIENT_PORTRAIT][LAYOUT_PANELS], p_mod, sizeof(p_mod));
   memcpy(out[ORIENT_PORTRAIT][LAYOUT_FOCUS], p_foc, sizeof(p_foc));
-  memcpy(out[ORIENT_LANDSCAPE][LAYOUT_INFOGRAPH], l_inf, sizeof(l_inf));
-  memcpy(out[ORIENT_LANDSCAPE][LAYOUT_MODULAR], l_mod, sizeof(l_mod));
+  memcpy(out[ORIENT_LANDSCAPE][LAYOUT_INSTRUMENTS], l_inf, sizeof(l_inf));
+  memcpy(out[ORIENT_LANDSCAPE][LAYOUT_PANELS], l_mod, sizeof(l_mod));
   memcpy(out[ORIENT_LANDSCAPE][LAYOUT_FOCUS], l_foc, sizeof(l_foc));
 }
 
@@ -107,8 +107,8 @@ void cfg_defaults(AppConfig& c) {
   c.sources[3] = SRC_NONE;
   c.poll_s = 8;
   c.rotation = 0;
-  c.layout[0] = LAYOUT_INFOGRAPH;
-  c.layout[1] = LAYOUT_INFOGRAPH;
+  c.layout[0] = LAYOUT_INSTRUMENTS;
+  c.layout[1] = LAYOUT_INSTRUMENTS;
   face_default_slots(c.slots);
   c.theme_mode = THEME_AUTO;
   c.accent[0] = 0; /* Pi default accent: Green (0,255,0) */

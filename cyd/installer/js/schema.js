@@ -9,7 +9,7 @@
 
 // Settings schema shared by the web installer and the on-device portal.
 // It mirrors cyd/firmware/src/core/config.cpp (JSON keys, enums, defaults)
-// and src/ui/layouts.cpp (watch-face slots). Keep them in sync.
+// and src/ui/layouts.cpp (scope layouts and widget slots). Keep them in sync.
 
 export const SCHEMA_VERSION = 1;
 
@@ -83,8 +83,8 @@ export const LAYOUTS = {
     list: [
       {
         key: 'infograph',
-        name: 'Infograph',
-        blurb: 'Seven complications framing the radar, like the Apple Watch Infograph face.',
+        name: 'Instruments',
+        blurb: 'Seven widgets framing the radar.',
         radar: { cx: 160, cy: 264, r: 140 },
         slots: [
           s(12, 4, 196, 100, 'large', 'Top'),
@@ -98,7 +98,7 @@ export const LAYOUTS = {
       },
       {
         key: 'modular',
-        name: 'Modular',
+        name: 'Panels',
         blurb: 'Big time on top, three circular gauges and a wide card below.',
         radar: { cx: 160, cy: 214, r: 120 },
         slots: [
@@ -111,8 +111,8 @@ export const LAYOUTS = {
       },
       {
         key: 'focus',
-        name: 'Radar Focus',
-        blurb: 'The biggest radar, with slim text complications around it.',
+        name: 'Focus',
+        blurb: 'The biggest round radar, with slim text widgets around it.',
         radar: { cx: 160, cy: 242, r: 154 },
         slots: [
           s(10, 6, 300, 34, 'inline', 'Top line'),
@@ -123,6 +123,13 @@ export const LAYOUTS = {
           s(224, 394, 92, 46, 'corner', 'Lower right'),
         ],
       },
+      {
+        key: 'full',
+        name: 'Full screen',
+        blurb: 'The radar fills the whole screen, edge to edge, with no widgets. The range you set reaches the nearer edges; the corners show further out.',
+        radar: { cx: 160, cy: 240, r: 0 },
+        slots: [],
+      },
     ],
   },
   l: {
@@ -131,8 +138,8 @@ export const LAYOUTS = {
     list: [
       {
         key: 'infograph',
-        name: 'Infograph',
-        blurb: 'Radar in the middle, complications in the four corners and both sides.',
+        name: 'Instruments',
+        blurb: 'Radar in the middle, widgets in the four corners and both sides.',
         radar: { cx: 240, cy: 160, r: 148 },
         slots: [
           s(4, 4, 100, 76, 'large', 'Top left'),
@@ -145,7 +152,7 @@ export const LAYOUTS = {
       },
       {
         key: 'modular',
-        name: 'Modular',
+        name: 'Panels',
         blurb: 'Radar on the left, a column of cards on the right.',
         radar: { cx: 158, cy: 160, r: 150 },
         slots: [
@@ -158,8 +165,8 @@ export const LAYOUTS = {
       },
       {
         key: 'focus',
-        name: 'Radar Focus',
-        blurb: 'Full-height radar with corner and side complications.',
+        name: 'Focus',
+        blurb: 'Full-height round radar with corner and side widgets.',
         radar: { cx: 240, cy: 160, r: 156 },
         slots: [
           s(4, 4, 100, 60, 'corner', 'Top left'),
@@ -170,12 +177,19 @@ export const LAYOUTS = {
           s(402, 124, 72, 72, 'circular', 'Right'),
         ],
       },
+      {
+        key: 'full',
+        name: 'Full screen',
+        blurb: 'The radar fills the whole screen, edge to edge, with no widgets. The range you set reaches the nearer edges; the corners show further out.',
+        radar: { cx: 240, cy: 160, r: 0 },
+        slots: [],
+      },
     ],
   },
 };
 
-// 2.8" boards (240x320): same layouts, slots and order as above, so a face
-// carries over between screens. Mirrors PORTRAIT_S / LANDSCAPE_S in the
+// 2.8" boards (240x320): same layouts, slots and order as above, so a scope
+// set up on one screen carries over to the other. Mirrors PORTRAIT_S / LANDSCAPE_S in the
 // firmware's src/ui/layouts.cpp.
 const resize = (big, w, h, geo) => ({
   w,
@@ -188,14 +202,16 @@ export const LAYOUTS_SMALL = {
     { radar: { cx: 120, cy: 172, r: 100 }, slots: [g(6, 2, 154, 66), g(174, 4, 62, 62), g(2, 72, 44, 32), g(194, 72, 44, 32), g(2, 240, 44, 30), g(194, 240, 44, 30), g(6, 276, 228, 42)] },
     { radar: { cx: 120, cy: 138, r: 74 }, slots: [g(8, 2, 224, 58), g(10, 216, 66, 56), g(87, 216, 66, 56), g(164, 216, 66, 56), g(6, 276, 228, 42)] },
     { radar: { cx: 120, cy: 160, r: 112 }, slots: [g(6, 3, 228, 24), g(6, 293, 228, 24), g(2, 30, 56, 32), g(182, 30, 56, 32), g(2, 258, 56, 32), g(182, 258, 56, 32)] },
+    { radar: { cx: 120, cy: 160, r: 0 }, slots: [] },
   ]),
   l: resize(LAYOUTS.l, 320, 240, [
     { radar: { cx: 160, cy: 120, r: 96 }, slots: [g(2, 2, 76, 58), g(262, 4, 54, 54), g(4, 92, 54, 54), g(262, 92, 54, 54), g(2, 186, 72, 52), g(246, 186, 72, 52)] },
     { radar: { cx: 110, cy: 120, r: 104 }, slots: [g(220, 2, 98, 58), g(220, 64, 98, 54), g(220, 122, 98, 54), g(220, 180, 48, 58), g(270, 180, 48, 58)] },
     { radar: { cx: 160, cy: 120, r: 112 }, slots: [g(2, 2, 70, 44), g(248, 2, 70, 44), g(2, 194, 70, 44), g(248, 194, 70, 44), g(2, 96, 46, 48), g(272, 96, 46, 48)] },
+    { radar: { cx: 160, cy: 120, r: 0 }, slots: [] },
   ]),
 };
-// Face previews for a board setting; "auto" shows the 2.8" CYD, the most common one.
+// Scope previews for a board setting; "auto" shows the 2.8" CYD, the most common one.
 export const layoutsFor = (board) => (board === 'e32r40t' ? LAYOUTS : LAYOUTS_SMALL);
 
 export const FACE_MAX_SLOTS = 8;
@@ -206,11 +222,13 @@ export const DEFAULT_SLOTS = {
     infograph: pad8(['time', 'weather', 'temp_range', 'wind', 'aircraft', 'moon', 'sun']),
     modular: pad8(['time', 'weather', 'temp_range', 'aircraft', 'sun']),
     focus: pad8(['time', 'nearest', 'weather', 'aircraft', 'sunrise', 'sunset']),
+    full: pad8([]),
   },
   l: {
     infograph: pad8(['time', 'weather', 'temp_range', 'aircraft', 'sunrise', 'sunset']),
     modular: pad8(['time', 'sun', 'nearest', 'weather', 'aircraft']),
     focus: pad8(['time', 'weather', 'sunrise', 'sunset', 'aircraft', 'wind']),
+    full: pad8([]),
   },
 };
 

@@ -35,6 +35,7 @@ struct NetCfg {
   uint32_t rev;
   double lat, lon;
   uint16_t range_nm;
+  float reach; /* how far past the set range to fetch: the screen's corners show more */
   uint8_t sources[CFG_MAX_SOURCES];
   char dump1090[96];
   uint8_t poll_s;
@@ -59,6 +60,8 @@ static void snapshot_cfg() {
   nc.lat = g_cfg.lat;
   nc.lon = g_cfg.lon;
   nc.range_nm = g_cfg.range_nm;
+  /* Full screen shows out to the corners, ~1.7x the range on a 3:4 screen. */
+  nc.reach = g_cfg.layout[cfg_orient_class(g_cfg)] == LAYOUT_FULL ? 1.8f : 1.3f;
   memcpy(nc.sources, g_cfg.sources, sizeof(nc.sources));
   memcpy(nc.dump1090, g_cfg.dump1090_url, sizeof(nc.dump1090));
   nc.poll_s = g_cfg.poll_s < 3 ? 3 : g_cfg.poll_s;
@@ -374,7 +377,7 @@ static int feed_order(uint8_t* out) {
 }
 
 static bool fetch_flights() {
-  float radius = nc.range_nm * 1.3f + 3.0f; /* a margin for rim blips */
+  float radius = nc.range_nm * nc.reach + 3.0f; /* a margin for rim blips */
   char url[160];
   int last_code = 0;
   uint8_t last_src = SRC_NONE;

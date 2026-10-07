@@ -223,6 +223,21 @@ void portal_init() {
       if (!captive_redirect()) serve_asset("/");
     });
   }
+  /* The bundled page and its files get real routes: anything left to
+   * onNotFound makes WebServer log "request handler not found". */
+  for (int i = 0; i < PORTAL_ASSET_COUNT; i++) {
+    const char* path = PORTAL_ASSETS[i].path;
+    server.on(path, HTTP_GET, [path]() {
+      if (!captive_redirect()) serve_asset(path);
+    });
+  }
+  server.on("/", HTTP_GET, []() {
+    if (!captive_redirect()) serve_asset("/");
+  });
+  server.on("/favicon.ico", HTTP_GET, []() { /* browsers ask for it; the page links an SVG icon */
+    server.sendHeader("Location", "/img/icon.svg", true);
+    server.send(301, "text/plain", "");
+  });
   server.onNotFound(handle_not_found);
   server.begin();
   xTaskCreatePinnedToCore(portal_task, "portal", 5120, nullptr, 1, nullptr, 0); /* ~1 KB used in device logs */

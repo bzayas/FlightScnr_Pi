@@ -32,6 +32,9 @@
 typedef void (*RadarTapCb)(uint32_t icao); /* 0 = tap on empty sky */
 
 lv_obj_t* radar_create(lv_obj_t* parent, int cx, int cy, int r);
+/* Full screen: the radar fills the rectangle; the set range reaches the
+ * nearer edges and the corners show further out. */
+lv_obj_t* radar_create_full(lv_obj_t* parent, int x, int y, int w, int h);
 void radar_destroy();
 void radar_set_tap_cb(RadarTapCb cb);
 void radar_set_range(float nm, bool animate);
@@ -42,5 +45,5 @@ uint32_t radar_selected();
 void radar_invalidate_all();
 void radar_set_dim(uint8_t opa);   /* editor mode dims the radar */
 void radar_location_changed();     /* rebuild runway list */
-/* Snapshot of displayed tracks (for complications / lists). */
+/* Snapshot of displayed tracks (for widgets / lists). */
 int radar_copy_flights(Flight* out, int max, float* dist_nm);

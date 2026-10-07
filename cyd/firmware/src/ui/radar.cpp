@@ -80,7 +80,11 @@ struct AirportLabel {
 };
 
 static lv_obj_t* s_obj;
-static int s_cx, s_cy, s_r;          /* local centre + radius */
+static int s_cx, s_cy, s_r;          /* local centre + radius of the range ring */
+/* Full screen: the radar fills the object's whole rectangle (no disc); the
+ * range ring keeps its scale and more rings fill the corners. */
+static bool s_rect;
+static float s_reach;                /* farthest drawn distance from the centre, px */
 static Track* s_tracks; /* heap: too big for static DRAM next to Bluetooth */
 static lv_area_t* s_boxes; /* heap scratch for place_tags: placed tags + icon obstacles */
 
@@ -126,6 +130,30 @@ static void abs_center(float* x, float* y) {
 }
 
 static float px_per_nm() { return s_r / fmaxf(0.5f, s_range_disp); }
+
+/* Is (x, y), relative to the centre, on the radar with `margin` px to spare? */
+static bool on_radar(float x, float y, float margin) {
+  if (s_rect) return fabsf(x) < s_cx - margin && fabsf(y) < s_cy - margin;
+  return x * x + y * y < (s_r - margin) * (s_r - margin);
+}
+
+/* The factor that brings (x, y) back onto the radar, `margin` px in. */
+static float pin_factor(float x, float y, float margin) {
+  if (!s_rect) return (s_r - margin) / fmaxf(1e-3f, sqrtf(x * x + y * y));
+  float kx = fabsf(x) > 1e-3f ? (s_cx - margin) / fabsf(x) : 1e9f;
+  float ky = fabsf(y) > 1e-3f ? (s_cy - margin) / fabsf(y) : 1e9f;
+  return fminf(kx, ky);
+}
+
+/* Point at `bearing` on the radar's edge, `margin` px in. */
+static void edge_point(float acx, float acy, float bearing, float margin, float* x, float* y) {
+  if (!s_rect) return fx_polar(acx, acy, s_r - margin, bearing, x, y);
+  float dx, dy;
+  fx_polar(0, 0, 1.0f, bearing, &dx, &dy);
+  float k = pin_factor(dx, dy, margin);
+  *x = acx + dx * k;
+  *y = acy + dy * k;
+}
 
 static void build_trail_lut() {
   /* Same falloff as draw.draw_sweep_line: faint wash + denser body. */
@@ -224,7 +252,7 @@ __attribute__((noinline)) static void rebuild_runways() {
   s_rwy_range = s_range_disp;
   update_origin();
   if (!g_cfg.runways || !cfg_has_location(g_cfg)) return;
-  float lim_nm = s_range_disp * 1.05f;
+  float lim_nm = s_range_disp * (s_reach / fmaxf(1.0f, (float)s_r)) * 1.05f;
   double dlat = lim_nm / 60.0 + 0.2;
   int32_t lo = (int32_t)((g_cfg.lat - dlat) * 1e5), hi = (int32_t)((g_cfg.lat + dlat) * 1e5);
   /* binary search the first airport at/after `lo` */
@@ -259,7 +287,7 @@ __attribute__((noinline)) static void rebuild_runways() {
       float e, n;
       geo_project(g_cfg.lat, g_cfg.lon, alat, alon, &e, &n);
       float x = e * k, y = -n * k;
-      if (x * x + y * y < (s_r - 14) * (s_r - 14)) cand[ncand++] = {x, y, ap.longest_kft, i};
+      if (on_radar(x, y, 14)) cand[ncand++] = {x, y, ap.longest_kft, i};
     }
   }
   /* Label the biggest airports first, and only where a label doesn't run
@@ -456,11 +484,11 @@ __attribute__((noinline)) static void place_tags() {
       const int c = j == 0 ? prev : (j <= prev ? j - 1 : j);
       float x0 = t.px + cand[c][0], y0 = t.py + cand[c][1];
       float x1 = x0 + t.tag_w, y1 = y0 + t.tag_h;
-      /* stay inside the disc */
+      /* stay on the radar */
       bool inside = true;
       const float corners[4][2] = {{x0, y0}, {x1, y0}, {x0, y1}, {x1, y1}};
       for (auto& k : corners)
-        if (k[0] * k[0] + k[1] * k[1] > (s_r - 3.0f) * (s_r - 3.0f)) inside = false;
+        if (!on_radar(k[0], k[1], 3.0f)) inside = false;
       if (!inside) continue;
       lv_area_t a = {(lv_coord_t)x0, (lv_coord_t)y0, (lv_coord_t)x1, (lv_coord_t)y1};
       bool clash = false;
@@ -527,7 +555,7 @@ static void sweep_area(float ang, float acx, float acy, lv_area_t* out) {
   ys[0] = acy;
   for (int i = 0; i < 5; i++) {
     float a = ang + 3.0f - (TRAIL_DEG + 6.0f) * i / 4.0f;
-    fx_polar(acx, acy, (float)s_r + 1, a, &xs[i + 1], &ys[i + 1]);
+    fx_polar(acx, acy, s_reach + 1, a, &xs[i + 1], &ys[i + 1]);
   }
   float x0 = xs[0], x1 = xs[0], y0 = ys[0], y1 = ys[0];
   for (int i = 1; i < 6; i++) {
@@ -551,10 +579,9 @@ __attribute__((noinline)) static void update_tracks(float dt, float acx, float a
     t.px = tx;
     t.py = ty;
     float x = t.px + t.ex, y = t.py + t.ey;
-    float d = sqrtf(x * x + y * y);
-    t.rim = d > s_r - 7;
-    if (t.rim && d > 0) { /* pin out-of-range targets to the rim (Pi: RADAR_RIM_STYLE=plane) */
-      float k = (s_r - 8) / d;
+    t.rim = !on_radar(x, y, 7.0f);
+    if (t.rim && (x != 0 || y != 0)) { /* pin out-of-range targets to the rim (Pi: RADAR_RIM_STYLE=plane) */
+      float k = pin_factor(x, y, 8.0f);
       t.ex = x * k - t.px;
       t.ey = y * k - t.py;
     }
@@ -649,6 +676,31 @@ static void radar_timer_cb(lv_timer_t*) {
 /* Drawing                                                                   */
 /* ------------------------------------------------------------------------ */
 
+/* Full screen: the field fills the object's rectangle. */
+static void draw_field_rect(Fx& f, float acx, float acy, const lv_area_t& tb, const lv_color_t* trail,
+                            float inv_step) {
+  lv_area_t o;
+  lv_obj_get_coords(s_obj, &o);
+  lv_color_t disc = pal().disc;
+  bool sweep = g_cfg.sweep;
+  int32_t y0 = LV_MAX(f.cy0, o.y1), y1 = LV_MIN(f.cy1, o.y2);
+  int32_t xa = LV_MAX(f.cx0, o.x1), xb = LV_MIN(f.cx1, o.x2);
+  for (int32_t y = y0; y <= y1; y++) {
+    lv_color_t* row = f.buf + (y - f.by) * f.stride - f.bx;
+    bool row_in_trail = sweep && y >= tb.y1 && y <= tb.y2;
+    float dy = y - acy;
+    for (int32_t x = xa; x <= xb; x++) {
+      lv_color_t c = disc;
+      if (row_in_trail && x >= tb.x1 && x <= tb.x2) {
+        float d = s_sweep - fx_fast_atan2_deg(x - acx, dy);
+        if (d < 0) d += 360.0f;
+        if (d < TRAIL_DEG) c = trail[(int)(d * inv_step)];
+      }
+      row[x] = c;
+    }
+  }
+}
+
 static void draw_disc(Fx& f, float acx, float acy) {
   const Palette& p = pal();
   const float R = (float)s_r;
@@ -656,12 +708,15 @@ static void draw_disc(Fx& f, float acx, float acy) {
   lv_color_t acc = p.accent;
   bool sweep = g_cfg.sweep;
   /* trail bounding box: skip the atan for pixels that can't be in it */
-  lv_area_t tb;
+  lv_area_t tb = {0, 0, -1, -1};
   if (sweep) sweep_area(s_sweep, acx, acy, &tb);
   lv_color_t trail[64];
   for (int i = 0; i < 64; i++) trail[i] = lv_color_mix(acc, disc, s_trail_lut[i]);
   const float inv_step = 63.0f / TRAIL_DEG;
 
+  if (s_rect) {
+    draw_field_rect(f, acx, acy, tb, trail, inv_step);
+  } else {
   int32_t y0 = LV_MAX(f.cy0, (int32_t)floorf(acy - R - 1)), y1 = LV_MIN(f.cy1, (int32_t)ceilf(acy + R + 1));
   for (int32_t y = y0; y <= y1; y++) {
     float dy = y - acy;
@@ -695,13 +750,17 @@ static void draw_disc(Fx& f, float acx, float acy) {
       }
     }
   }
+  }
   if (sweep) { /* bright leading edge (Pi: tip_rgb = accent + 40) */
     lv_color32_t a32;
     a32.full = lv_color_to32(acc);
     lv_color_t tip = lv_color_make(LV_MIN(255, a32.ch.red + 40), LV_MIN(255, a32.ch.green + 40),
                                    LV_MIN(255, a32.ch.blue + 40));
     float ex, ey;
-    fx_polar(acx, acy, R - 1, s_sweep, &ex, &ey);
+    if (s_rect)
+      edge_point(acx, acy, s_sweep, 0.0f, &ex, &ey);
+    else
+      fx_polar(acx, acy, R - 1, s_sweep, &ex, &ey);
     fx_capsule(f, acx, acy, ex, ey, 0.9f, tip, 235);
   }
 }
@@ -761,22 +820,24 @@ static void draw_text(lv_draw_ctx_t* dc, const char* txt, const lv_font_t* font,
 static void draw_grid(Fx& f, lv_draw_ctx_t* dc, float acx, float acy) {
   const Palette& p = pal();
   uint8_t opa = (uint8_t)(220 * s_dim / 255);
-  for (int k = 1; k <= RING_COUNT; k++) draw_dashed_ring(f, acx, acy, s_r * k / (float)RING_COUNT - (k == RING_COUNT ? 2 : 0), p.accent, opa);
-  float R = s_r - 2.0f;
-  draw_dashed_line(f, acx - R, acy, acx + R, acy, p.accent, (uint8_t)(opa * 0.75f));
-  draw_dashed_line(f, acx, acy - R, acx, acy + R, p.accent, (uint8_t)(opa * 0.75f));
+  /* Full screen: more rings at the same spacing, out into the corners. */
+  const int rings = s_rect ? (int)(s_reach / (s_r / (float)RING_COUNT)) : RING_COUNT;
+  for (int k = 1; k <= rings; k++)
+    draw_dashed_ring(f, acx, acy, s_r * k / (float)RING_COUNT - (!s_rect && k == RING_COUNT ? 2 : 0), p.accent, opa);
+  float rx = s_rect ? (float)s_cx : s_r - 2.0f, ry = s_rect ? (float)s_cy : s_r - 2.0f;
+  draw_dashed_line(f, acx - rx, acy, acx + rx, acy, p.accent, (uint8_t)(opa * 0.75f));
+  draw_dashed_line(f, acx, acy - ry, acx, acy + ry, p.accent, (uint8_t)(opa * 0.75f));
 
-  /* compass labels */
+  /* compass labels, just inside the rim (or the screen's edge) */
   static const char* const card[8] = {"N", "NE", "E", "SE", "S", "SW", "W", "NW"};
   for (int i = 0; i < 8; i++) {
     bool major = (i & 1) == 0;
-    float rr = s_r - (major ? 11.0f : 16.0f);
     float x, y;
-    fx_polar(acx, acy, rr, i * 45.0f, &x, &y);
+    edge_point(acx, acy, i * 45.0f, major ? 11.0f : (s_rect ? 14.0f : 16.0f), &x, &y);
     draw_text(dc, card[i], major ? &fs_text_16 : &fs_text_12, p.accent, opa, x, y, LV_TEXT_ALIGN_CENTER, true);
   }
   /* range labels on each ring (Pi: SCALE_LABEL_BEARING_DEG) */
-  for (int k = 1; k <= RING_COUNT; k++) {
+  for (int k = 1; k <= rings; k++) {
     float v = dist_from_nm(s_range_disp * k / RING_COUNT);
     char buf[16];
     if (v >= 10)
@@ -785,6 +846,7 @@ static void draw_grid(Fx& f, lv_draw_ctx_t* dc, float acx, float acy) {
       snprintf(buf, sizeof(buf), "%.1f%s", v, dist_unit());
     float x, y;
     fx_polar(acx, acy, s_r * k / (float)RING_COUNT - 9.0f, RANGE_LABEL_BEARING, &x, &y);
+    if (s_rect && !on_radar(x - acx, y - acy, 12.0f)) continue; /* that ring's label is off screen */
     draw_text(dc, buf, &fs_text_12, p.accent, (uint8_t)(opa * 0.9f), x, y, LV_TEXT_ALIGN_CENTER, true);
   }
 }
@@ -793,10 +855,9 @@ static void draw_runways(Fx& f, lv_draw_ctx_t* dc, float acx, float acy) {
   if (!g_cfg.runways) return;
   const Palette& p = pal();
   uint8_t opa = (uint8_t)(170 * s_dim / 255);
-  float lim2 = (float)(s_r - 2) * (s_r - 2);
   for (int i = 0; i < s_nrwy; i++) {
     const RunwayPx& r = s_rwy[i];
-    if (r.x0 * r.x0 + r.y0 * r.y0 > lim2 && r.x1 * r.x1 + r.y1 * r.y1 > lim2) continue;
+    if (!on_radar(r.x0, r.y0, 2.0f) && !on_radar(r.x1, r.y1, 2.0f)) continue;
     fx_capsule(f, acx + r.x0, acy + r.y0, acx + r.x1, acy + r.y1, 1.0f, p.runway, opa);
   }
   for (int i = 0; i < s_napt; i++)
@@ -927,17 +988,34 @@ static void event_cb(lv_event_t* e) {
 /* Public API                                                                */
 /* ------------------------------------------------------------------------ */
 
+static lv_obj_t* create_common(lv_obj_t* parent, int x, int y, int w, int h);
+
 lv_obj_t* radar_create(lv_obj_t* parent, int cx, int cy, int r) {
-  build_trail_lut();
-  if (!s_tracks) s_tracks = (Track*)calloc(MAX_TRACKS, sizeof(Track));
-  if (!s_boxes) s_boxes = (lv_area_t*)calloc(2 * MAX_TRACKS, sizeof(lv_area_t));
+  s_rect = false;
   s_cx = r + 1;
   s_cy = r + 1;
   s_r = r;
+  s_reach = (float)r;
+  return create_common(parent, cx - r - 1, cy - r - 1, 2 * r + 3, 2 * r + 3);
+}
+
+lv_obj_t* radar_create_full(lv_obj_t* parent, int x, int y, int w, int h) {
+  s_rect = true;
+  s_cx = w / 2;
+  s_cy = h / 2;
+  s_r = LV_MIN(w, h) / 2 - 4; /* the set range reaches the nearer edges */
+  s_reach = sqrtf((float)(s_cx * s_cx + s_cy * s_cy));
+  return create_common(parent, x, y, w, h);
+}
+
+static lv_obj_t* create_common(lv_obj_t* parent, int x, int y, int w, int h) {
+  build_trail_lut();
+  if (!s_tracks) s_tracks = (Track*)calloc(MAX_TRACKS, sizeof(Track));
+  if (!s_boxes) s_boxes = (lv_area_t*)calloc(2 * MAX_TRACKS, sizeof(lv_area_t));
   s_obj = lv_obj_create(parent);
   lv_obj_remove_style_all(s_obj);
-  lv_obj_set_pos(s_obj, cx - r - 1, cy - r - 1);
-  lv_obj_set_size(s_obj, 2 * r + 3, 2 * r + 3);
+  lv_obj_set_pos(s_obj, x, y);
+  lv_obj_set_size(s_obj, w, h);
   lv_obj_clear_flag(s_obj, LV_OBJ_FLAG_SCROLLABLE);
   lv_obj_add_flag(s_obj, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_EVENT_BUBBLE | LV_OBJ_FLAG_GESTURE_BUBBLE);
   lv_obj_add_event_cb(s_obj, event_cb, LV_EVENT_ALL, nullptr);

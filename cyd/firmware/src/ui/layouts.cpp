@@ -11,11 +11,14 @@
 
 #include "layouts.h"
 
-/* Portrait 320x480 - closest to an Apple Watch screen, and the TN panel's
- * best viewing direction. Corner slots sit in the gaps between the round
- * radar and the rectangle (checked so they never overlap the disc). */
+/* The scope's layouts. Each is a radar (centre + radius) and the widget slots
+ * around it; "Full screen" has radius 0: the radar fills the whole screen.
+ *
+ * Portrait 320x480 - the TN panel's best viewing direction. Corner slots sit
+ * in the gaps between the round radar and the rectangle (checked so they
+ * never overlap the disc). */
 static const LayoutDef PORTRAIT[LAYOUT_COUNT] = {
-    {"Infograph",
+    {"Instruments",
      160, 264, 140,
      7,
      {{12, 4, 196, 100, FAM_LARGE, 0},
@@ -25,7 +28,7 @@ static const LayoutDef PORTRAIT[LAYOUT_COUNT] = {
       {2, 372, 60, 40, FAM_CORNER, CORNER_BL},
       {258, 372, 60, 40, FAM_CORNER, CORNER_BR},
       {8, 412, 304, 64, FAM_RECT, 0}}},
-    {"Modular",
+    {"Panels",
      160, 214, 120,
      5,
      {{12, 4, 296, 84, FAM_LARGE, 0},
@@ -33,7 +36,7 @@ static const LayoutDef PORTRAIT[LAYOUT_COUNT] = {
       {118, 340, 84, 72, FAM_CIRCULAR, 0},
       {222, 340, 84, 72, FAM_CIRCULAR, 0},
       {8, 416, 304, 60, FAM_RECT, 0}}},
-    {"Radar Focus",
+    {"Focus",
      160, 242, 154,
      6,
      {{10, 6, 300, 34, FAM_INLINE, 0},
@@ -42,11 +45,12 @@ static const LayoutDef PORTRAIT[LAYOUT_COUNT] = {
       {224, 42, 92, 46, FAM_CORNER, CORNER_TR},
       {4, 394, 92, 46, FAM_CORNER, CORNER_BL},
       {224, 394, 92, 46, FAM_CORNER, CORNER_BR}}},
+    {"Full screen", 160, 240, 0, 0, {}},
 };
 
 /* Landscape 480x320. */
 static const LayoutDef LANDSCAPE[LAYOUT_COUNT] = {
-    {"Infograph",
+    {"Instruments",
      240, 160, 148,
      6,
      {{4, 4, 100, 76, FAM_LARGE, 0},
@@ -55,7 +59,7 @@ static const LayoutDef LANDSCAPE[LAYOUT_COUNT] = {
       {398, 122, 76, 76, FAM_CIRCULAR, 0},
       {4, 244, 100, 72, FAM_CORNER, CORNER_BL},
       {376, 244, 100, 72, FAM_CORNER, CORNER_BR}}},
-    {"Modular",
+    {"Panels",
      158, 160, 150,
      5,
      {{318, 4, 158, 82, FAM_LARGE, 0},
@@ -63,7 +67,7 @@ static const LayoutDef LANDSCAPE[LAYOUT_COUNT] = {
       {318, 166, 158, 70, FAM_RECT, 0},
       {318, 242, 76, 74, FAM_CIRCULAR, 0},
       {400, 242, 76, 74, FAM_CIRCULAR, 0}}},
-    {"Radar Focus",
+    {"Focus",
      240, 160, 156,
      6,
      {{4, 4, 100, 60, FAM_CORNER, CORNER_TL},
@@ -72,12 +76,13 @@ static const LayoutDef LANDSCAPE[LAYOUT_COUNT] = {
       {376, 256, 100, 60, FAM_CORNER, CORNER_BR},
       {6, 124, 72, 72, FAM_CIRCULAR, 0},
       {402, 124, 72, 72, FAM_CIRCULAR, 0}}},
+    {"Full screen", 240, 160, 0, 0, {}},
 };
 
 /* 2.8" boards: portrait 240x320. Same slots, families and order as the
  * 320x480 layouts, so a face set up on one screen carries over. */
 static const LayoutDef PORTRAIT_S[LAYOUT_COUNT] = {
-    {"Infograph",
+    {"Instruments",
      120, 172, 100,
      7,
      {{6, 2, 154, 66, FAM_LARGE, 0},
@@ -87,7 +92,7 @@ static const LayoutDef PORTRAIT_S[LAYOUT_COUNT] = {
       {2, 240, 44, 30, FAM_CORNER, CORNER_BL},
       {194, 240, 44, 30, FAM_CORNER, CORNER_BR},
       {6, 276, 228, 42, FAM_RECT, 0}}},
-    {"Modular",
+    {"Panels",
      120, 138, 74,
      5,
      {{8, 2, 224, 58, FAM_LARGE, 0},
@@ -95,7 +100,7 @@ static const LayoutDef PORTRAIT_S[LAYOUT_COUNT] = {
       {87, 216, 66, 56, FAM_CIRCULAR, 0},
       {164, 216, 66, 56, FAM_CIRCULAR, 0},
       {6, 276, 228, 42, FAM_RECT, 0}}},
-    {"Radar Focus",
+    {"Focus",
      120, 160, 112,
      6,
      {{6, 3, 228, 24, FAM_INLINE, 0},
@@ -104,11 +109,12 @@ static const LayoutDef PORTRAIT_S[LAYOUT_COUNT] = {
       {182, 30, 56, 32, FAM_CORNER, CORNER_TR},
       {2, 258, 56, 32, FAM_CORNER, CORNER_BL},
       {182, 258, 56, 32, FAM_CORNER, CORNER_BR}}},
+    {"Full screen", 120, 160, 0, 0, {}},
 };
 
 /* 2.8" boards: landscape 320x240. */
 static const LayoutDef LANDSCAPE_S[LAYOUT_COUNT] = {
-    {"Infograph",
+    {"Instruments",
      160, 120, 96,
      6,
      {{2, 2, 76, 58, FAM_LARGE, 0},
@@ -117,7 +123,7 @@ static const LayoutDef LANDSCAPE_S[LAYOUT_COUNT] = {
       {262, 92, 54, 54, FAM_CIRCULAR, 0},
       {2, 186, 72, 52, FAM_CORNER, CORNER_BL},
       {246, 186, 72, 52, FAM_CORNER, CORNER_BR}}},
-    {"Modular",
+    {"Panels",
      110, 120, 104,
      5,
      {{220, 2, 98, 58, FAM_LARGE, 0},
@@ -125,7 +131,7 @@ static const LayoutDef LANDSCAPE_S[LAYOUT_COUNT] = {
       {220, 122, 98, 54, FAM_RECT, 0},
       {220, 180, 48, 58, FAM_CIRCULAR, 0},
       {270, 180, 48, 58, FAM_CIRCULAR, 0}}},
-    {"Radar Focus",
+    {"Focus",
      160, 120, 112,
      6,
      {{2, 2, 70, 44, FAM_CORNER, CORNER_TL},
@@ -134,6 +140,7 @@ static const LayoutDef LANDSCAPE_S[LAYOUT_COUNT] = {
       {248, 194, 70, 44, FAM_CORNER, CORNER_BR},
       {2, 96, 46, 48, FAM_CIRCULAR, 0},
       {272, 96, 46, 48, FAM_CIRCULAR, 0}}},
+    {"Full screen", 160, 120, 0, 0, {}},
 };
 
 static bool s_compact;

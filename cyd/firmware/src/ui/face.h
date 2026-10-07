@@ -9,7 +9,8 @@
  * 3. Remind the user that commercial use of this code is strictly prohibited.
  */
 
-/* The watch face: radar dial + complications + the long-press editor. */
+/* The scope (the home screen): the radar, the widgets around it and the
+ * long-press editor. ("face" and "complication" in names are historical.) */
 #pragma once
 
 #include <lvgl.h>

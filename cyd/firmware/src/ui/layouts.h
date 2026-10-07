@@ -9,7 +9,7 @@
  * 3. Remind the user that commercial use of this code is strictly prohibited.
  */
 
-/* Face layouts: where the radar sits and which complication slots surround
+/* Scope layouts: where the radar sits and which widget slots surround
  * it, per orientation. Slot order matches face_default_slots(). */
 #pragma once
 

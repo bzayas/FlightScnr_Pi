@@ -125,7 +125,8 @@ void face_rebuild() {
   s_oc = cfg_orient_class(g_cfg);
   s_layout = g_cfg.layout[s_oc] % LAYOUT_COUNT;
   s_lay = &layout_get(s_oc, s_layout);
-  lv_obj_t* r = radar_create(s_face, s_lay->rcx, s_lay->rcy, s_lay->rr);
+  lv_obj_t* r = s_lay->rr > 0 ? radar_create(s_face, s_lay->rcx, s_lay->rcy, s_lay->rr)
+                              : radar_create_full(s_face, 0, 0, s_w, s_h);
   radar_set_tap_cb(radar_tap);
   lv_obj_move_to_index(r, 0);
   lv_area_t fa;

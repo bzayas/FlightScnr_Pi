@@ -10,7 +10,7 @@
  */
 
 /*
- * Complication library, modelled on Apple Watch ClockKit / WidgetKit:
+ * Widget library ("complications" in the code), in five sizes:
  * every data source (CompId) fills a family-agnostic CompData "template";
  * each family (inline, corner, circular, rectangular, large) knows how to
  * render any template at its size, with a few rich custom renderers

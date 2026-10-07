@@ -15,7 +15,7 @@
  *   day   = the light-basemap palette from screens/radar.py
  *           (_LIGHT_MAP_* colours, white frosted HUD pill)
  * The CYD only adds the automatic switch at sunrise / sunset (with a short
- * cross-fade) and Apple-style system colours for complication glyphs.
+ * cross-fade) and a set of system colours for widget glyphs.
  */
 #pragma once
 
@@ -31,7 +31,7 @@ struct Palette {
   lv_color_t alert_mil, alert_watch, alert_flash, alert_flash_watch;
   lv_color_t tag_id, tag_type, tag_up, tag_down;
   lv_color_t runway, airport;
-  lv_color_t platter;     /* complication / card background (Pi HUD pill) */
+  lv_color_t platter;     /* widget / card background (Pi HUD pill) */
   lv_color_t text, text2, text3;
   lv_color_t sep;
   lv_color_t blue, green, red, orange, yellow, teal, purple, indigo, pink, gray;
