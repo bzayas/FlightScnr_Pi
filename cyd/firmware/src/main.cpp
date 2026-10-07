@@ -43,7 +43,9 @@ extern bool g_bt_mem_short;
  * (~40 KB) and Wi-Fi (~50 KB) from the heap once the UI exists. Below this,
  * keeping Bluetooth would crash Wi-Fi start-up, so it's given up for the
  * session instead (the speaker is used, and the UI says why). */
-static const uint32_t BT_MIN_HEAP_AFTER_UI = 100 * 1024;
+/* Measured on a 2.8" CYD: Bluedroid's A2DP source takes ~84 KB and Wi-Fi
+ * with the portal and network tasks ~72 KB, plus room to run. */
+static const uint32_t BT_MIN_HEAP_AFTER_UI = (84 + 72 + 24) * 1024;
 
 /* LVGL layout + our renderers nest deeper than Arduino's default 8 KB. */
 SET_LOOP_TASK_STACK_SIZE(16 * 1024);

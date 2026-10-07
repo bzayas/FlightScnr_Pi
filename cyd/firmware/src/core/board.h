@@ -17,7 +17,8 @@
  *   2.8" ESP32-2432S028R   ILI9341 240x320, backlight IO21, XPT2046 touch on
  *                          its own SPI (25/32/39, CS 33, IRQ 36), RGB LED
  *                          4/16/17, speaker IO26 (no amplifier enable)
- *   2.8" ESP32-2432S028    the dual-USB (USB-C) revision: ST7789, inverted
+ *   2.8" ESP32-2432S028    the revision with two USB ports: ST7789, inverted
+ *                          (single-port boards, micro-USB or USB-C, are ILI9341)
  *   4.0" E32R40T/E32N40T   LCDWiki ESP32-32E: ST7796S 320x480, backlight
  *                          IO27, touch shares the LCD bus, RGB LED 22/16/17,
  *                          speaker IO26 with amplifier enable IO4 (LOW = on)

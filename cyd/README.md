@@ -63,7 +63,7 @@ A native port of [FlightScnr Pi](https://github.com/yashmulgaonkar/FlightScnr_Pi
 | | 2.8″ ESP32-2432S028R (the original CYD) | 4.0″ ESP32-32E (LCDWiki **E32R40T** / E32N40T) |
 |---|---|---|
 | MCU | ESP32-D0WD-V3, 240 MHz, 4 MB flash, no PSRAM | same |
-| Display | ILI9341 240×320 TN (the USB-C revision: ST7789) | ST7796S 320×480 TN |
+| Display | ILI9341 240×320 TN (the revision with two USB ports: ST7789) | ST7796S 320×480 TN |
 | LCD SPI | SCK 14, MOSI 13, MISO 12, CS 15, DC 2 | same |
 | Backlight | GPIO 21 | GPIO 27 |
 | Touch | XPT2046 on its own pins: SCK 25, MOSI 32, MISO 39, CS 33, IRQ 36 | XPT2046 on the LCD bus, CS 33, IRQ 36 |
@@ -166,8 +166,10 @@ esptool.py --chip esp32 write_flash 0x0 out/flightscnr-cyd-*.bin
 
 Choose **Sound → Play sound through → Bluetooth** in the installer, the portal or on the device. Then pair from **Settings → Sound → Bluetooth** on the display, or from the portal. FlightScnr reconnects to that speaker automatically, and falls back to the onboard speaker whenever it isn't connected.
 
+**Not available on the supported boards yet.** Bluetooth audio needs about 180 KB of free memory alongside Wi-Fi and the display, and these boards have no PSRAM: about 110 KB is left once the display is up. FlightScnr checks at start-up, gives the Bluetooth memory back, and plays through the built-in speaker instead, and the display and the portal say why. The code stays for boards with PSRAM.
+
 Limitations:
-- The ESP32 has no PSRAM. Turning Bluetooth on restarts the board once, so the Bluetooth radio's memory is only reserved while it's in use.
+- Turning Bluetooth on restarts the board once, so the Bluetooth radio's memory is only reserved while it's in use.
 - Classic Bluetooth A2DP only (SBC, 44.1 kHz stereo). Speakers that need a PIN other than 0000 won't pair.
 - Wi-Fi and Bluetooth share one radio, so streaming LiveATC over Bluetooth on a weak Wi-Fi signal can stutter.
 - LiveATC streams are for personal listening only, per LiveATC.net's terms.

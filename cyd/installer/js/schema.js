@@ -226,8 +226,8 @@ export const orientClass = (rotation) => ((rotation & 1) ? 'l' : 'p');
 // Supported boards (firmware: core/board.h, BoardId order).
 export const BOARDS = [
   { v: 'auto', name: 'Detect automatically' },
-  { v: 'cyd28', name: '2.8″ ESP32-2432S028R (micro-USB)' },
-  { v: 'cyd28usbc', name: '2.8″ ESP32-2432S028 (USB-C, ST7789)' },
+  { v: 'cyd28', name: '2.8″ ESP32-2432S028R (one USB port)' },
+  { v: 'cyd28usbc', name: '2.8″ ESP32-2432S028 (two USB ports, ST7789)' },
   { v: 'e32r40t', name: '4.0″ ESP32-32E E32R40T / E32N40T' },
 ];
 

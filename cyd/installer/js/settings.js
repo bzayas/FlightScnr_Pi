@@ -671,6 +671,9 @@ export class SettingsUI {
     const renderBt = () => {
       if (c.audio.out !== 'bluetooth') return bt.replaceChildren();
       const rows = [];
+      rows.push(h('div', { class: 'row stack' }, h('div', { class: 'note warn' }, h('span', {}, '⚠️'), h('p', {},
+        h('b', {}, 'Bluetooth audio doesn’t fit on the 2.8″ and 4.0″ boards yet. '),
+        'It needs about 180 KB of free memory alongside Wi-Fi, and these boards (no PSRAM) have about 110 KB. FlightScnr plays through the built-in speaker instead, and says so on the display.'))));
       const cur = c.audio.bt_name || c.audio.bt_mac;
       rows.push(this.row('Speaker', cur ? c.audio.bt_mac : 'None paired yet', h('span', { class: 'value' }, c.audio.bt_name || (cur ? 'Unnamed' : '—'))));
       const saved = this.api.saved?.();
@@ -830,7 +833,7 @@ export class SettingsUI {
       this.header('Display', 'Brightness follows the theme: the day level from sunrise to sunset, the night level after dark.'),
       this.group('Brightness', [this.slider('Daytime', 'display.bright_day', { min: 5 }), this.slider('Night', 'display.bright_night', { min: 2 })]),
       this.group('Panel', [
-        this.select('Board', 'display.board', BOARDS.map((b) => ({ v: b.v, t: b.name })), 'FlightScnr recognises the board from its screen. Pick one only if the screen stays dark. Restarts the device.'),
+        this.select('Board', 'display.board', BOARDS.map((b) => ({ v: b.v, t: b.name })), 'Leave on Detect: FlightScnr asks the screen what it is, and its answer wins over this setting. Pick a board only if the screen can’t be read and stays dark. Restarts the device.'),
         this.toggle('Invert colours', 'display.invert', 'Turn on if colours look like a photo negative. Some CYD clones use IPS panels.'),
         this.toggle('BGR colour order', 'display.bgr', 'Turn off if red and blue are swapped.'),
         this.toggle('Fast SPI (80 MHz)', 'display.spi80', 'Smoother animation. Turn off if you see noise or stripes. Restarts the device.'),

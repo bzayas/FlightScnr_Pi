@@ -27,7 +27,7 @@ static const BoardDef BOARDS[] = {
     {BOARD_AUTO, "auto", "", PANEL_ILI9341, 240, 320, false, 21, 4, 16, 17, -1, false, 25, 32, 39},
     {BOARD_CYD28, "cyd28", "ESP32-2432S028R 2.8in ILI9341", PANEL_ILI9341, 240, 320, false, 21, 4, 16, 17, -1, false,
      25, 32, 39},
-    {BOARD_CYD28_USBC, "cyd28usbc", "ESP32-2432S028 2.8in ST7789 (USB-C)", PANEL_ST7789, 240, 320, true, 21, 4, 16, 17,
+    {BOARD_CYD28_USBC, "cyd28usbc", "ESP32-2432S028 2.8in ST7789 (two USB ports)", PANEL_ST7789, 240, 320, true, 21, 4, 16, 17,
      -1, false, 25, 32, 39},
     {BOARD_E32R40T, "e32r40t", "ESP32-32E 4.0in ST7796S (E32R40T)", PANEL_ST7796, 320, 480, false, 27, 22, 16, 17, 4,
      true, PIN_LCD_SCK, PIN_LCD_MOSI, PIN_LCD_MISO},
@@ -62,7 +62,9 @@ static bool contains(uint64_t v, int vbits, uint32_t pattern, int bits) {
   return false;
 }
 
-static uint8_t detect() {
+/* What the panel says it is: a board id, BOARD_CYD28 for a panel that
+ * answers but gives no ID (the ILI9341), or BOARD_AUTO for no answer. */
+static uint8_t probe() {
   pinMode(PIN_LCD_CS, OUTPUT);
   digitalWrite(PIN_LCD_CS, HIGH);
   pinMode(PIN_LCD_DC, OUTPUT);
@@ -78,19 +80,37 @@ static uint8_t detect() {
   pinMode(PIN_TOUCH_CS, INPUT);
   Serial.printf("[board] panel ID reads: D3h %010llX, 04h %010llX, 0Ah %04llX\n", (unsigned long long)id4,
                 (unsigned long long)id, (unsigned long long)pwr);
-  s_detected = true;
   if (contains(id4, 40, 0x7796, 16)) return BOARD_E32R40T;
   if (contains(id, 40, 0x858552, 24)) return BOARD_CYD28_USBC;
-  /* No ID: the ILI9341 doesn't give one this way. If the panel answered the
-   * power-mode read at all, it's there; otherwise this is a best guess. */
-  s_detected = (pwr != 0 && pwr != 0xFFFF);
-  return BOARD_CYD28;
+  return (pwr != 0 && pwr != 0xFFFF) ? BOARD_CYD28 : BOARD_AUTO;
 }
 
+/* The panel's own answer wins over the setting, which is only a fallback
+ * for a panel that can't be read: a wrong pick otherwise leaves a lit but
+ * empty screen. One exception: an ST7796 whose ID read failed looks like
+ * an ILI9341, so a 4.0" setting stands unless another ID was read. */
 void board_select(uint8_t wanted) {
-  uint8_t id = wanted > BOARD_AUTO && wanted < BOARD_COUNT ? wanted : detect();
-  if (wanted > BOARD_AUTO && wanted < BOARD_COUNT) s_detected = true;
+  if (wanted >= BOARD_COUNT) wanted = BOARD_AUTO;
+  uint8_t seen = probe();
+  uint8_t id;
+  const char* why;
+  if (seen == BOARD_E32R40T || seen == BOARD_CYD28_USBC) {
+    id = seen;
+    why = "detected";
+  } else if (seen == BOARD_CYD28 && wanted != BOARD_E32R40T) {
+    id = seen;
+    why = "detected";
+  } else if (wanted != BOARD_AUTO) {
+    id = wanted;
+    why = "set in settings";
+  } else {
+    id = BOARD_CYD28;
+    why = "guessed: the panel didn't answer";
+  }
+  s_detected = seen != BOARD_AUTO;
   s_board = &BOARDS[id];
-  Serial.printf("[board] %s (%s)\n", s_board->name,
-                wanted > BOARD_AUTO && wanted < BOARD_COUNT ? "set in settings" : (s_detected ? "detected" : "guessed"));
+  Serial.printf("[board] %s (%s)\n", s_board->name, why);
+  if (wanted != BOARD_AUTO && wanted != id)
+    Serial.printf("[board] settings say %s, but the screen identifies as %s: using the screen's answer\n",
+                  BOARDS[wanted].name, s_board->name);
 }
