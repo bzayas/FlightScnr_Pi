@@ -95,6 +95,16 @@ jobs:
       - name: Package firmware for the installer
         run: python3 tools/package_firmware.py ../installer/firmware
 
+      - name: Build the display test image
+        run: |
+          pio run -e cyd-display-test
+          python3 tools/package_firmware.py --display-test ../display-test
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: flightscnr-cyd-display-test
+          path: cyd/display-test/*.bin
+
       - name: Build the single-file installer
         run: python3 ../installer/tools/build_standalone.py ../installer/flightscnr-cyd-installer.html
 

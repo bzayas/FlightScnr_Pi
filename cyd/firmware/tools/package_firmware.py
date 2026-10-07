@@ -40,8 +40,11 @@ PARTS = [
 
 
 def main() -> int:
-    out = os.path.abspath(sys.argv[1] if len(sys.argv) > 1 else os.path.join(FW, "..", "installer", "firmware"))
-    build = os.path.join(FW, ".pio", "build", ENV)
+    args = [a for a in sys.argv[1:] if not a.startswith("--")]
+    test = "--display-test" in sys.argv  # merged image of env cyd-display-test only
+    env = "cyd-display-test" if test else ENV
+    out = os.path.abspath(args[0] if args else os.path.join(FW, "..", "installer", "firmware"))
+    build = os.path.join(FW, ".pio", "build", env)
     with open(os.path.join(FW, "..", "VERSION")) as f:
         version = f.read().strip()
     os.makedirs(out, exist_ok=True)
@@ -54,18 +57,23 @@ def main() -> int:
     }
     for name, src in sources.items():
         if not os.path.exists(src):
-            print(f"missing {src} (run `pio run -e {ENV}` first)", file=sys.stderr)
+            print(f"missing {src} (run `pio run -e {env}` first)", file=sys.stderr)
             return 1
         shutil.copyfile(src, os.path.join(out, name))
 
-    merged = f"flightscnr-cyd-{version}.bin"
+    merged = f"flightscnr-cyd-{'display-test-' if test else ''}{version}.bin"
     esptool = os.path.join(PIO_HOME, "packages", "tool-esptoolpy", "esptool.py")
     cmd = [sys.executable, esptool] if os.path.exists(esptool) else [sys.executable, "-m", "esptool"]
     cmd += ["--chip", "esp32", "merge_bin", "-o", os.path.join(out, merged),
-            "--flash_mode", "dio", "--flash_freq", "80m", "--flash_size", "4MB"]
+            "--flash_mode", "dio", "--flash_freq", "40m" if test else "80m", "--flash_size", "4MB"]
     for name, off in PARTS:
         cmd += [hex(off), os.path.join(out, name)]
     subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL)
+    if test:
+        for name, _ in PARTS:
+            os.remove(os.path.join(out, name))
+        print(f"display test image: {os.path.join(out, merged)} (flash at 0x0)")
+        return 0
 
     manifest = {
         "name": "FlightScnr CYD",

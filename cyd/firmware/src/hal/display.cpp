@@ -11,6 +11,7 @@
 
 #define LGFX_USE_V1
 #include "display.h"
+#include "lgfx_cyd40.h"
 
 #include <Arduino.h>
 #include <LovyanGFX.hpp>
@@ -26,81 +27,6 @@
 /* Panel description                                                         */
 /* ------------------------------------------------------------------------ */
 
-class LGFX_CYD40 : public lgfx::LGFX_Device {
- public:
-  lgfx::Panel_ST7796 panel;
-  lgfx::Bus_SPI bus;
-  lgfx::Light_PWM light;
-  lgfx::Touch_XPT2046 touch;
-
-  void configure(bool spi80, bool invert, bool bgr) {
-    {
-      auto cfg = bus.config();
-      cfg.spi_host = SPI2_HOST; /* HSPI: IO_MUX pins 12/13/14 allow 80 MHz */
-      cfg.spi_mode = 0;
-      cfg.freq_write = spi80 ? 80000000 : 40000000;
-      cfg.freq_read = 16000000;
-      cfg.spi_3wire = false;
-      cfg.use_lock = true;
-      cfg.dma_channel = SPI_DMA_CH_AUTO;
-      cfg.pin_sclk = PIN_LCD_SCK;
-      cfg.pin_mosi = PIN_LCD_MOSI;
-      cfg.pin_miso = PIN_LCD_MISO;
-      cfg.pin_dc = PIN_LCD_DC;
-      bus.config(cfg);
-      panel.setBus(&bus);
-    }
-    {
-      auto cfg = panel.config();
-      cfg.pin_cs = PIN_LCD_CS;
-      cfg.pin_rst = PIN_LCD_RST;
-      cfg.pin_busy = -1;
-      cfg.panel_width = LCD_NATIVE_W;
-      cfg.panel_height = LCD_NATIVE_H;
-      cfg.memory_width = LCD_NATIVE_W;
-      cfg.memory_height = LCD_NATIVE_H;
-      cfg.offset_x = 0;
-      cfg.offset_y = 0;
-      cfg.offset_rotation = 0;
-      cfg.dummy_read_pixel = 8;
-      cfg.dummy_read_bits = 1;
-      cfg.readable = true;
-      cfg.invert = invert;
-      cfg.rgb_order = !bgr; /* LovyanGFX: false -> BGR */
-      cfg.dlen_16bit = false;
-      cfg.bus_shared = true; /* XPT2046 shares the bus */
-      panel.config(cfg);
-    }
-    {
-      auto cfg = light.config();
-      cfg.pin_bl = PIN_LCD_BL;
-      cfg.invert = false;
-      cfg.freq = 20000; /* above audible range: no backlight whine */
-      cfg.pwm_channel = 7;
-      light.config(cfg);
-      panel.setLight(&light);
-    }
-    {
-      auto cfg = touch.config();
-      cfg.x_min = 0;
-      cfg.x_max = 4095;
-      cfg.y_min = 0;
-      cfg.y_max = 4095;
-      cfg.pin_int = PIN_TOUCH_IRQ;
-      cfg.bus_shared = true;
-      cfg.offset_rotation = 0;
-      cfg.spi_host = SPI2_HOST;
-      cfg.freq = 2500000;
-      cfg.pin_sclk = PIN_LCD_SCK;
-      cfg.pin_mosi = PIN_LCD_MOSI;
-      cfg.pin_miso = PIN_LCD_MISO;
-      cfg.pin_cs = PIN_TOUCH_CS;
-      touch.config(cfg);
-      panel.setTouch(&touch);
-    }
-    setPanel(&panel);
-  }
-};
 
 static LGFX_CYD40 lcd;
 static lv_disp_draw_buf_t s_draw_buf;

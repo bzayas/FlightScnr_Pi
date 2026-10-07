@@ -131,6 +131,13 @@ Tomorrow.io only issues keys to a signed-in account with a verified email, so no
 
 The free plan allows 500 calls a day and 25 an hour. FlightScnr uses about 120 a day: current conditions every 15 minutes and the forecast hourly. It backs off for 10 minutes on a rate limit, and falls back to Open-Meteo whenever Tomorrow.io is unavailable.
 
+### Display stays dark?
+
+1. On the installer's **Install** page, open **Device log** with the board plugged in. It restarts the board and shows everything it prints, and explains brownouts (weak USB power) and crashes in plain words.
+2. Flash the **display test** to separate hardware from software. Get `flightscnr-cyd-display-test-<version>.bin` from the *flightscnr-cyd-display-test* CI artifact, or build it with `pio run -e cyd-display-test && python3 tools/package_firmware.py --display-test out/`. Then choose *Use a different file…* and *Firmware only*; your settings stay.
+
+   The test lights the backlight, cycles the RGB LED, reads the panel ID, fills red, green, blue and white, and echoes touches, logging every step. Reinstall FlightScnr afterwards.
+
 ### Manual flashing
 
 ```bash

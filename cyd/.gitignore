@@ -18,3 +18,4 @@ firmware/sim/shots/
 # Firmware images are built by CI and published with the installer
 installer/firmware/
 installer/flightscnr-cyd-installer*.html
+display-test/
