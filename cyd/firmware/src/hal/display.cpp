@@ -22,6 +22,7 @@
 #include "core/board.h"
 #include "core/config.h"
 #include "core/platform.h"
+#include "core/touch_filter.h"
 
 /* ------------------------------------------------------------------------ */
 /* Panel description                                                         */
@@ -121,51 +122,29 @@ void plat_screen_to_native(int sx, int sy, float* nx, float* ny) {
   }
 }
 
-/* Resistive panels jitter and report phantom releases; smooth and debounce.
- * A finger presses less firmly than a stylus, so during a drag the panel
- * drops more samples: once the touch has moved, a short gap (100 ms) is
- * bridged instead of ending the drag. Taps keep the quick 40 ms release. */
+/* Raw samples go through the shared touch filter (core/touch_filter.cpp):
+ * settle, smooth, axis lock and dropout bridging. */
+volatile bool g_touch_in_progress;
+static TouchFilter s_touch;
+
 static void touch_read_cb(lv_indev_drv_t*, lv_indev_data_t* data) {
-  static int32_t last_x, last_y, down_x, down_y;
-  static float fx = -1, fy = -1;
-  static uint8_t release_count;
-  static bool dragging;
   int rx, ry;
-  if (plat_touch_raw(&rx, &ry)) {
+  bool got = plat_touch_raw(&rx, &ry);
+  float sx = 0, sy = 0;
+  if (got) {
     float nx = s_cal.a * rx + s_cal.b * ry + s_cal.c;
     float ny = s_cal.d * rx + s_cal.e * ry + s_cal.f;
-    const bool first = fx < 0; /* first sample of this touch */
-    if (first) {
-      fx = nx;
-      fy = ny;
-    } else {
-      /* light IIR: steadies drags without adding visible lag */
-      fx += (nx - fx) * 0.6f;
-      fy += (ny - fy) * 0.6f;
-    }
-    int32_t sx, sy;
-    native_to_screen((int32_t)lroundf(fx), (int32_t)lroundf(fy), &sx, &sy);
-    last_x = constrain(sx, 0, display_width() - 1);
-    last_y = constrain(sy, 0, display_height() - 1);
-    if (first) {
-      down_x = last_x;
-      down_y = last_y;
-      dragging = false;
-    } else if (abs(last_x - down_x) + abs(last_y - down_y) > 10) {
-      dragging = true;
-    }
-    release_count = 0;
-    data->state = LV_INDEV_STATE_PR;
-  } else if (release_count < (dragging ? 5 : 2) && fx >= 0) {
-    release_count++; /* bridge dropped samples mid-touch */
-    data->state = LV_INDEV_STATE_PR;
-  } else {
-    fx = fy = -1;
-    dragging = false;
-    data->state = LV_INDEV_STATE_REL;
+    int32_t ix, iy;
+    native_to_screen((int32_t)lroundf(nx), (int32_t)lroundf(ny), &ix, &iy);
+    sx = constrain(ix, 0, display_width() - 1);
+    sy = constrain(iy, 0, display_height() - 1);
   }
-  data->point.x = last_x;
-  data->point.y = last_y;
+  int32_t x, y;
+  bool pressed = touch_filter_step(s_touch, got, sx, sy, &x, &y);
+  g_touch_in_progress = s_touch.active || s_touch.settling;
+  data->state = pressed ? LV_INDEV_STATE_PR : LV_INDEV_STATE_REL;
+  data->point.x = x;
+  data->point.y = y;
 }
 
 /* ------------------------------------------------------------------------ */

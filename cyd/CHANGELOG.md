@@ -13,6 +13,19 @@
 
 Versions are `year.month.day.iteration`. The version you're running is under **Settings → About** on the display.
 
+## 2026.10.7.8
+
+- **Swiping with a finger works.** Touch is read the same way for a fingertip as for a stylus:
+  - the touch controller's pen-down signal, which flickers under a light finger and used to cut swipes short, now only starts a touch; while touching, pressure alone decides;
+  - the controller is read at a slower clock, which steadies light presses;
+  - the first, off-target reading of a touch is ignored;
+  - a swipe commits to sideways or up-and-down once it has moved a few pixels, so a page swipe that drifts no longer scrolls Sky instead;
+  - a page turns after a tenth of the screen width (was an eighth).
+- **Sky:**
+  - the temperature gauge's low and high no longer touch the ends of its arc;
+  - the Open-Meteo credit breaks before the licence instead of leaving "4.0)" on its own line.
+- The simulator checks swipes with a simulated fingertip as well as a stylus, and shoots more of the Sky page.
+
 ## 2026.10.7.7
 
 A design pass over every widget, glyph and card, measured in a new simulator gallery rather than judged by eye.

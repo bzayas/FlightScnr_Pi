@@ -138,7 +138,7 @@ static void pager_feedback(lv_indev_drv_t*, uint8_t code) {
   auto& p = indev->proc.types.pointer;
   if (p.scroll_obj != s_tv || p.scroll_dir != LV_DIR_HOR) return;
   lv_coord_t moved = p.scroll_sum.x; /* finger travel since the drag began; > 0 = rightwards */
-  lv_coord_t need = LV_MAX(24, s_w / 8);
+  lv_coord_t need = LV_MAX(20, s_w / 10); /* the touch filter holds the first few px for the axis lock */
   if (LV_ABS(moved) < need) return;  /* a nudge: let it settle back */
   lv_coord_t push = moved > 0 ? s_w / 3 : -s_w / 3;
   if ((p.scroll_throw_vect.x > 0) != (push > 0) || LV_ABS(p.scroll_throw_vect.x) < LV_ABS(push))

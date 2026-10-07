@@ -73,7 +73,7 @@ Any serial monitor works too, at **115200 baud** (Arduino IDE, PlatformIO's `pio
 
 - **Taps land in the wrong place:** **Settings → Calibrate touch**. If you can't reach Settings, hold **BOOT** while the board starts, or start calibration from the portal's **System** page.
 - **Taps are ignored:** press firmly. The screen is resistive: it needs pressure, and a stylus or fingernail works better than a fingertip.
-- **Swiping between pages is hard:** a short, quick flick works best, about an eighth of the screen width. Keep the stylus or finger pressed throughout the swipe.
+- **Swiping between pages is hard:** check **Settings → About** shows 2026.10.7.8 or later, which reads fingertips much more reliably. Then swipe sideways about a tenth of the screen width, or flick. Press with the pad of your finger and keep it pressed until the end of the swipe. A swipe that starts out mostly sideways stays a page swipe, even if it drifts up or down.
 
 ## Random restarts
 

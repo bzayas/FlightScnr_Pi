@@ -1308,9 +1308,10 @@ static void draw_gauge_dial(Fx& f, lv_draw_ctx_t* dc, Slot* s, const CompData& d
   const lv_font_t* lf = &fs_text_12;
   int lcap = ink(lf).cap();
   int lbase = (int)lroundf(ey + lcap / 2.0f);
-  float lx = ex * 0.64f;
   if (d.lo[0] && d.hi[0]) {
     int wl = text_w(d.lo, lf), wh = text_w(d.hi, lf);
+    /* inward of the arc's end caps, which sit level with the labels */
+    float lx = fminf(ex * 0.64f, ex - hw - 2.5f - LV_MAX(wl, wh) / 2.0f);
     float outer = lx + LV_MAX(wl, wh) / 2.0f;
     labels = 2 * lx - (wl + wh) / 2.0f >= 4 && sqrtf(outer * outer + (lbase - cy) * (lbase - cy)) <= R - 2 &&
              lbase - lcap > vbase + 2;
