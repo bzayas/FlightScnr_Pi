@@ -213,7 +213,7 @@ Also included: scrollable **list pickers** for on-device settings, portal **Rout
 
 ### Also on the ESP32 Cheap Yellow Display
 
-[`cyd/`](cyd/README.md) is a native port to the 4.0″ ESP32-32E “Cheap Yellow Display” (320×480 ST7796S). It has a radar watch face with Apple Watch-style complications, automatic day/night themes and Bluetooth audio, and installs from the browser.
+[`cyd/`](cyd/README.md) is a native port to the ESP32 “Cheap Yellow Display”: the 2.8″ ESP32-2432S028R and the 4.0″ ESP32-32E. It has a radar watch face with Apple Watch-style complications and automatic day/night themes, and installs from the browser.
 
 ---
 
