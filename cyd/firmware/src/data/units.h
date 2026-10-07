@@ -30,7 +30,10 @@ void fmt_speed(float kt, char* out, size_t n);       /* "320 mph" */
 void fmt_wind(float kmh, char* out, size_t n);       /* "12 mph" */
 void fmt_vs(int fpm, char* out, size_t n);           /* "+1,200 ft/min" */
 void fmt_thousands(long v, char* out, size_t n);
-void fmt_clock_hm(const struct tm* t, char* hm, size_t n, char* ampm, size_t an); /* "10:42" + "AM" */
+void fmt_clock_hm(const struct tm* t, char* hm, size_t n, char* ampm, size_t an);
+/* strftime() that also understands %-d %-m %-H %-I %-M (no leading zero).
+ * The ESP32's newlib doesn't, and prints garbage for them. */
+size_t fmt_strftime(char* out, size_t n, const char* fmt, const struct tm* t); /* "10:42" + "AM" */
 void fmt_clock(time_t t, char* out, size_t n);       /* "7:02 AM" / "07:02" */
 void fmt_duration(long secs, char* out, size_t n);   /* "4h 12m" */
 void fmt_ago(long secs, char* out, size_t n);        /* "5m ago" */

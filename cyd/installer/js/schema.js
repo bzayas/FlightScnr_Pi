@@ -62,10 +62,9 @@ export const COMPLICATIONS = [
   { key: 'fastest', name: 'Fastest', group: 'Flights', desc: 'Fastest aircraft in range.' },
   { key: 'tracked', name: 'Tracked Flight', group: 'Flights', desc: 'Your tracked flight, anywhere.' },
   { key: 'quake', name: 'Earthquake', group: 'Sky', desc: 'Latest nearby USGS quake (24 h).' },
-  { key: 'audio', name: 'LiveATC Audio', group: 'Sound', desc: 'Tap to play your tower feed.' },
   { key: 'status', name: 'Status', group: 'System', desc: 'Wi-Fi and data feed health.' },
 ];
-export const COMP_GROUPS = ['Time', 'Weather', 'Sky', 'Flights', 'Sound', 'System'];
+export const COMP_GROUPS = ['Time', 'Weather', 'Sky', 'Flights', 'System'];
 
 export const FAMILY_NAMES = {
   large: 'Large',
@@ -262,21 +261,6 @@ export function defaults() {
       slots: structuredClone(DEFAULT_SLOTS),
     },
     display: { bright_day: 100, bright_night: 35, invert: false, bgr: true, spi80: false, board: 'auto' },
-    audio: {
-      out: 'speaker',
-      bt_name: '',
-      bt_mac: '',
-      vol: 70,
-      vol_chime: 60,
-      vol_alert: 80,
-      vol_atc: 80,
-      chime: false,
-      quiet: true,
-      quiet_start: 22,
-      quiet_end: 7,
-      atc: '',
-      atc_label: '',
-    },
     alerts: {
       military: true,
       emergency: true,
@@ -313,6 +297,7 @@ export function normalize(json) {
     }
   if (!Array.isArray(c.face.accent) || c.face.accent.length !== 3) c.face.accent = [0, 255, 0];
   c.alerts.watch = (c.alerts.watch || []).filter(Boolean).slice(0, 8);
+  delete c.audio; // sound settings from older versions (audio was removed)
   return c;
 }
 
@@ -370,8 +355,6 @@ export function validate(c) {
   if (c.radar.sources.includes('dump1090') && !/^https?:\/\//.test(c.radar.dump1090))
     issues.push({ level: 'error', section: 'flights', text: 'Local receiver needs a URL like http://192.168.1.20:8080/data/aircraft.json' });
   if (!c.radar.sources.length) issues.push({ level: 'error', section: 'flights', text: 'Pick at least one flight data source.' });
-  if (c.audio.out === 'bluetooth' && !c.audio.bt_name && !c.audio.bt_mac)
-    issues.push({ level: 'warn', section: 'sound', text: 'Bluetooth is on but no speaker is chosen yet. Pair one on the device in Settings → Sound → Bluetooth.' });
   const len = new TextEncoder().encode(JSON.stringify(toDeviceJson(c))).length;
   if (len > CFG_SLOT_SIZE - CFG_HEADER_SIZE - 64)
     issues.push({ level: 'error', section: 'install', text: `Settings are too large (${len} bytes).` });

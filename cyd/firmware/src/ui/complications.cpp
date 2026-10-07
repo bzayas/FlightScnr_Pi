@@ -17,7 +17,6 @@
 #include <stdio.h>
 #include <string.h>
 
-#include "audio/audio.h"
 #include "core/config.h"
 #include "core/platform.h"
 #include "data/geo.h"
@@ -35,8 +34,7 @@
 static const char* const COMP_NAMES[COMP_COUNT] = {
     "Off",         "Time",          "Date",        "Weather",   "Temperature", "Forecast",   "Sunrise & Sunset",
     "Sunrise",     "Sunset",        "Daylight",    "Moon",      "Wind",        "Humidity",   "UV Index",
-    "Aircraft",    "Nearest Flight", "Highest",     "Fastest",   "Tracked Flight", "Earthquake", "LiveATC Audio",
-    "Status",
+    "Aircraft",    "Nearest Flight", "Highest",     "Fastest",   "Tracked Flight", "Earthquake", "Status",
 };
 
 const char* comp_display_name(uint8_t c) { return c < COMP_COUNT ? COMP_NAMES[c] : ""; }
@@ -65,7 +63,6 @@ struct Ctx {
   bool tracked_ok;
   float tracked_dist;
   QuakeData quake;
-  AudioStatus audio;
   NetStatus net;
   FeedStatus feed;
   uint16_t peak;
@@ -124,7 +121,6 @@ void comp_refresh_context() {
   C.tracked_dist = (C.tracked_ok && C.loc_ok)
                        ? (float)geo_dist_nm(g_cfg.lat, g_cfg.lon, C.tracked.lat, C.tracked.lon)
                        : 0;
-  audio_get_status(&C.audio);
 }
 
 /* ------------------------------------------------------------------------ */
@@ -198,12 +194,12 @@ void comp_build(uint8_t comp, uint8_t family, CompData& d) {
       fmt_clock_hm(&C.lt, hm, sizeof(hm), ap, sizeof(ap));
       SET(value, hm);
       SET(unit, ap);
-      strftime(buf, sizeof(buf), "%A, %B %-d", &C.lt);
+      fmt_strftime(buf, sizeof(buf), "%A, %B %-d", &C.lt);
       SET(line2, buf);
       strftime(buf, sizeof(buf), "%a", &C.lt);
       for (char* c = buf; *c; c++) *c = (char)toupper((unsigned char)*c);
       SET(title, buf);
-      strftime(buf, sizeof(buf), "%b %-d", &C.lt);
+      fmt_strftime(buf, sizeof(buf), "%b %-d", &C.lt);
       SET(line3, buf);
       d.custom = family == FAM_LARGE ? CUSTOM_BIGTIME : (family == FAM_CIRCULAR ? CUSTOM_ANALOG : CUSTOM_NONE);
       break;
@@ -219,7 +215,7 @@ void comp_build(uint8_t comp, uint8_t family, CompData& d) {
       SET(title, buf);
       snprintf(buf, sizeof(buf), "%d", C.lt.tm_mday);
       SET(value, buf);
-      strftime(buf, sizeof(buf), family == FAM_INLINE ? "%A, %B %-d" : "%B %Y", &C.lt);
+      fmt_strftime(buf, sizeof(buf), family == FAM_INLINE ? "%A, %B %-d" : "%B %Y", &C.lt);
       SET(line2, buf);
       strftime(buf, sizeof(buf), "%A", &C.lt);
       SET(line3, buf);
@@ -552,25 +548,6 @@ void comp_build(uint8_t comp, uint8_t family, CompData& d) {
       d.tint = C.quake.mag >= 5 ? p.red : (C.quake.mag >= 4 ? p.orange : p.yellow);
       break;
     }
-    case COMP_AUDIO: {
-      d.glyph = GLYPH_SPEAKER;
-      d.tint = C.audio.atc_playing ? p.green : p.text2;
-      SET(title, "LIVEATC");
-      if (!g_cfg.atc_mount[0]) {
-        SET(value, "Off");
-        SET(line2, "Pick a feed in the portal");
-      } else {
-        SET(value, C.audio.atc_playing ? (C.audio.atc_buffering ? "Tuning" : "Live") : "Play");
-        SET(line2, C.audio.atc_label);
-      }
-      const char* out = g_cfg.audio_out == AUDIO_BLUETOOTH
-                            ? (C.audio.bt_state >= BT_CONNECTED ? C.audio.bt_peer : "Bluetooth: not connected")
-                            : (g_cfg.audio_out == AUDIO_SPEAKER ? "Built-in speaker" : "Audio off");
-      SET(line3, out);
-      d.gauge = C.audio.level / 100.0f;
-      d.custom = C.audio.atc_playing && (family == FAM_RECT || family == FAM_LARGE) ? CUSTOM_LEVEL : CUSTOM_NONE;
-      break;
-    }
     case COMP_STATUS: {
       d.glyph = GLYPH_RADAR;
       d.tint = C.feed.ok ? p.green : p.orange;
@@ -645,6 +622,24 @@ static void txt(lv_draw_ctx_t* dc, const char* s, const lv_font_t* f, lv_color_t
   d.color = c;
   d.opa = opa;
   lv_draw_label(dc, &d, &a, s, nullptr);
+}
+
+/* Left-aligned text cut to max_w with an ellipsis ("AIR CANAD..." would
+ * otherwise spill out of a narrow slot). */
+static void txt_fit(lv_draw_ctx_t* dc, const char* s, const lv_font_t* f, lv_color_t c, int x, int y, int max_w) {
+  if (!s || !*s) return;
+  if (max_w <= 0 || text_w(s, f) <= max_w) return txt(dc, s, f, c, 255, x, y, LV_TEXT_ALIGN_LEFT);
+  char buf[72];
+  size_t n = strlen(s);
+  if (n > sizeof(buf) - 4) n = sizeof(buf) - 4;
+  memcpy(buf, s, n);
+  buf[n] = 0;
+  while (n > 0) {
+    do n--; while (n > 0 && ((unsigned char)buf[n] & 0xC0) == 0x80); /* whole UTF-8 characters */
+    memcpy(buf + n, "\xE2\x80\xA6", 4);
+    if (text_w(buf, f) <= max_w) break;
+  }
+  txt(dc, buf, f, c, 255, x, y, LV_TEXT_ALIGN_LEFT);
 }
 
 /* Value text with an Apple-style vertical roll when it changes. */
@@ -943,7 +938,7 @@ static void render_large(Fx& f, lv_draw_ctx_t* dc, Slot* s, const CompData& d, c
     txt(dc, d.line3, df, p.text, 255, a.x1 + 1 + ww + 6, dy, LV_TEXT_ALIGN_LEFT);
     return;
   }
-  if (d.custom == CUSTOM_SOLAR || d.custom == CUSTOM_HOURLY || d.custom == CUSTOM_ALT_BANDS || d.custom == CUSTOM_LEVEL) {
+  if (d.custom == CUSTOM_SOLAR || d.custom == CUSTOM_HOURLY || d.custom == CUSTOM_ALT_BANDS) {
     platter_rect(dc, a, 18);
     int pad = 10;
     txt(dc, d.title, &fs_text_12, d.tint, 255, a.x1 + pad, a.y1 + pad - 2, LV_TEXT_ALIGN_LEFT);
@@ -987,12 +982,11 @@ static void render_rect(Fx& f, lv_draw_ctx_t* dc, Slot* s, const CompData& d, co
     glyph_draw(f, d.glyph, hx + 7, a.y1 + pad + 6, 15, glyph_args(d, p.platter));
     hx += 18;
   }
-  txt(dc, d.title, &fs_text_12, d.tint, 255, hx, a.y1 + pad - 3, LV_TEXT_ALIGN_LEFT);
+  txt_fit(dc, d.title, &fs_text_12, d.tint, hx, a.y1 + pad - 3, a.x2 - pad - hx);
 
   int body_y = a.y1 + pad + 11;
   int body_h = h - pad - 11 - 6;
-  bool has_chart = wide && (d.custom == CUSTOM_SOLAR || d.custom == CUSTOM_HOURLY || d.custom == CUSTOM_ALT_BANDS ||
-                            d.custom == CUSTOM_LEVEL);
+  bool has_chart = wide && (d.custom == CUSTOM_SOLAR || d.custom == CUSTOM_HOURLY || d.custom == CUSTOM_ALT_BANDS);
   if (!wide && h < 80 && (d.custom == CUSTOM_SOLAR || d.custom == CUSTOM_HOURLY)) {
     /* narrow rect: value line + chart under it */
     const lv_font_t* vf = fit_font(d.value, d.numeric, w - 2 * pad - 30, 26);
@@ -1001,7 +995,7 @@ static void render_rect(Fx& f, lv_draw_ctx_t* dc, Slot* s, const CompData& d, co
     if (d.custom == CUSTOM_SOLAR)
       draw_solar_curve(f, dc, a.x1 + pad, body_y + vf->line_height - 2, w - 2 * pad, a.y2 - pad - (body_y + vf->line_height - 2), false);
     else
-      txt(dc, d.line2, &fs_text_12, p.text2, 255, a.x1 + pad, body_y + vf->line_height, LV_TEXT_ALIGN_LEFT);
+      txt_fit(dc, d.line2, &fs_text_12, p.text2, a.x1 + pad, body_y + vf->line_height, w - 2 * pad);
     return;
   }
   const lv_font_t* vf = fit_font(d.value, d.numeric, text_w_max - (d.unit[0] ? 30 : 0), LV_MIN(body_h - 14, 34));
@@ -1015,7 +1009,7 @@ static void render_rect(Fx& f, lv_draw_ctx_t* dc, Slot* s, const CompData& d, co
       snprintf(line, sizeof(line), "%s \xC2\xB7 %s", d.line2, d.line3);
     else
       snprintf(line, sizeof(line), "%s", d.line2);
-    txt(dc, line, &fs_text_14, p.text2, 255, a.x1 + pad, ly, LV_TEXT_ALIGN_LEFT);
+    txt_fit(dc, line, &fs_text_14, p.text2, a.x1 + pad, ly, (has_chart ? w * 45 / 100 : w - pad) - pad);
   } else if (d.line2[0] && !has_chart) { /* short: line2 to the right of the value */
     txt(dc, d.line2, &fs_text_14, p.text2, 255, a.x1 + pad + vw + (d.unit[0] ? 36 : 10), body_y + vf->line_height - 18,
         LV_TEXT_ALIGN_LEFT);
@@ -1027,14 +1021,6 @@ static void render_rect(Fx& f, lv_draw_ctx_t* dc, Slot* s, const CompData& d, co
     if (d.custom == CUSTOM_SOLAR) draw_solar_curve(f, dc, cx0, cy0, cw, ch, h >= 56); /* labels need room */
     if (d.custom == CUSTOM_HOURLY) draw_hourly(f, dc, cx0, cy0, cw, ch);
     if (d.custom == CUSTOM_ALT_BANDS) draw_alt_bands(f, cx0, cy0 + 6, cw, ch - 10);
-    if (d.custom == CUSTOM_LEVEL) {
-      for (int i = 0; i < 12; i++) {
-        float x = cx0 + (i + 0.5f) * cw / 12.0f;
-        float lv = d.gauge * (0.55f + 0.45f * sinf(plat_millis() * 0.01f + i * 1.7f));
-        float bh = fmaxf(3.0f, (ch - 8) * lv);
-        fx_capsule(f, x, cy0 + ch / 2.0f - bh / 2, x, cy0 + ch / 2.0f + bh / 2, 2.0f, p.green, 255);
-      }
-    }
   } else if (wide && d.glyph) {
     float gs = h - 14.0f;
     glyph_draw(f, d.glyph, a.x2 - pad - gs / 2, a.y1 + h / 2.0f, gs, glyph_args(d, p.platter));
@@ -1134,14 +1120,18 @@ static void render_corner(Fx& f, lv_draw_ctx_t* dc, Slot* s, const CompData& d, 
   int y = bottom ? text_area.y2 - vf->line_height : text_area.y1;
   int title_y = bottom ? y - 12 : y + vf->line_height - 3;
   GlyphArgs ga = glyph_args(d, p.bg);
+  /* A caption that can't fit (2.8" corners are ~44 px) is left out rather
+   * than run into the radar: the glyph and value still say what it is. */
+  const char* cap = d.title[0] ? d.title : d.line2;
+  if (text_w(cap, &fs_text_12) > w + 12) cap = "";
   if (right) {
     value_txt(dc, s, val, "", vf, p.text, x, y, LV_TEXT_ALIGN_RIGHT);
     if (gs > 0) glyph_draw(f, d.glyph, x - vw - 4 - gs / 2, y + vf->line_height / 2.0f, gs, ga);
-    txt(dc, d.title[0] ? d.title : d.line2, &fs_text_12, d.tint, 255, x, title_y, LV_TEXT_ALIGN_RIGHT);
+    txt(dc, cap, &fs_text_12, d.tint, 255, x, title_y, LV_TEXT_ALIGN_RIGHT);
   } else {
     if (gs > 0) glyph_draw(f, d.glyph, x + gs / 2, y + vf->line_height / 2.0f, gs, ga);
     value_txt(dc, s, val, "", vf, p.text, x + (int)gs + (gs > 0 ? 4 : 0), y, LV_TEXT_ALIGN_LEFT);
-    txt(dc, d.title[0] ? d.title : d.line2, &fs_text_12, d.tint, 255, x, title_y, LV_TEXT_ALIGN_LEFT);
+    txt(dc, cap, &fs_text_12, d.tint, 255, x, title_y, LV_TEXT_ALIGN_LEFT);
   }
 }
 

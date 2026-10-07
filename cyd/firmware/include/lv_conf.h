@@ -75,10 +75,10 @@
     #endif
 
 #else       /*LV_MEM_CUSTOM*/
-    #define LV_MEM_CUSTOM_INCLUDE <stdlib.h>   /*Header for the dynamic memory function*/
-    #define LV_MEM_CUSTOM_ALLOC   malloc
-    #define LV_MEM_CUSTOM_FREE    free
-    #define LV_MEM_CUSTOM_REALLOC realloc
+    #define LV_MEM_CUSTOM_INCLUDE "fs_lv_mem.h" /* heap + emergency reserve (src/core/mem_guard) */
+    #define LV_MEM_CUSTOM_ALLOC   fs_lv_malloc
+    #define LV_MEM_CUSTOM_FREE    fs_lv_free
+    #define LV_MEM_CUSTOM_REALLOC fs_lv_realloc
 #endif     /*LV_MEM_CUSTOM*/
 
 /*Number of the intermediate memory buffer used during rendering and other internal processing mechanisms.

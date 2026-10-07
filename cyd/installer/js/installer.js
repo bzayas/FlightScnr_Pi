@@ -82,13 +82,12 @@ class InstallerUI extends SettingsUI {
         this.row(h('b', {}, 'A Cheap Yellow Display'), 'The 2.8″ ESP32-2432S028R (micro-USB or USB-C) or the 4.0″ ESP32-32E (E32R40T). FlightScnr recognises which one you have. 3.5″ boards aren’t supported yet.', tile('display', 'var(--yellow)'), { cls: 'has-icon' }),
         this.row(h('b', {}, 'A USB data cable'), 'Charge-only cables are the #1 reason a board isn’t found.', tile('install', 'var(--green)'), { cls: 'has-icon' }),
         this.row(h('b', {}, 'Chrome or Edge on a computer'), 'Phones and Safari/Firefox can’t flash over USB.', tile('start', 'var(--blue)'), { cls: 'has-icon' }),
-        this.row(h('b', {}, 'Optional: a speaker'), 'A small 8 Ω speaker on the board’s speaker connector, or any Bluetooth speaker.', tile('speaker', 'var(--pink)'), { cls: 'has-icon' }),
       ]),
       this.group('How it works', [h('div', { class: 'row stack' }, h('ol', { class: 'steps' },
         h('li', {}, h('b', {}, 'Fill in your settings'), ': Wi-Fi, location, and an optional weather key. Each page explains what’s needed.'),
         h('li', {}, h('b', {}, 'Plug in the display and press Install.'), ' The firmware and your settings are written together, so it boots ready to go.'),
         h('li', {}, h('b', {}, 'First boot'), ' shows the safety notice. Tap Accept. If touches land in the wrong place, the touch calibration starts by itself.'),
-        h('li', {}, h('b', {}, 'Change things later'), ' on the device (swipe to Settings, or long-press the face to customise it), or from any browser at ', h('code', {}, `http://${this.cfg.wifi.host || 'flightscnr'}.local`), '.'),
+        h('li', {}, h('b', {}, 'Change things later'), ' on the device (swipe to Settings, or long-press the face to customise it), or from any browser at the address shown on the display under Settings → Portal.'),
       ))]),
       h('section', { class: 'group' }, h('div', { class: 'caption' }, 'A look around'), h('div', { class: 'gallery' }, shots.map(([f, cap]) => h('figure', {}, h('img', { src: asset(`img/${f}`), loading: 'lazy', alt: cap, width: f.startsWith('l_') ? 270 : 180, height: f.startsWith('l_') ? 180 : 270 }), cap)))),
       this.group('Board not showing up?', [h('div', { class: 'row stack' }, h('ul', {},
@@ -273,7 +272,7 @@ class InstallerUI extends SettingsUI {
         after.replaceChildren(h('div', { class: 'note ok' }, h('span', {}, '✅'), h('div', {},
           h('p', {}, h('b', {}, mode === 'firmware' ? 'Firmware updated.' : 'Installed. Your display is restarting.')),
           h('p', {}, 'Read and accept the safety notice on screen. FlightScnr then joins ', h('b', {}, state.cfg.wifi.ssid || 'its setup hotspot'), ' and the radar fills in within a few seconds.'),
-          h('p', {}, 'Later, change settings from any browser at ', h('a', { href: `http://${state.cfg.wifi.host || 'flightscnr'}.local`, target: '_blank', rel: 'noopener' }, `http://${state.cfg.wifi.host || 'flightscnr'}.local`), ', or right on the device.'))));
+          h('p', {}, 'Later, change settings right on the device, or from any browser at the address it shows under Settings → Portal.'))));
         toast('Install complete');
         state.busy = false;
         await startLog(true); /* watch it boot */

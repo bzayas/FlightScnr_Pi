@@ -84,7 +84,6 @@ for (const oc of ['p', 'l'])
   for (const lay of LAYOUTS[oc].list)
     c.face.slots[oc][lay.key] = c.face.slots[oc][lay.key].map((_, i) => (i < lay.slots.length ? keys[k++ % keys.length] : 'none'));
 Object.assign(c.display, { bright_day: 80, bright_night: 12, invert: true, bgr: false, spi80: true });
-Object.assign(c.audio, { out: 'bluetooth', bt_name: 'JBL Flip 6', bt_mac: '11:22:33:AA:BB:CC', vol: 55, vol_chime: 20, vol_alert: 95, vol_atc: 40, chime: true, quiet: false, quiet_start: 23, quiet_end: 6, atc: 'yssy_twr', atc_label: 'YSSY Tower' });
 Object.assign(c.alerts, { military: false, emergency: false, tracked: false, watch_on: false, quake: true, quake_min: 4.5, quake_km: 800, track: 'QFA1', watch: ['UAL1', 'N123AB', 'BAW', 'VH-OQA'.replace('-', ''), 'A1B2C3', 'DAL501', 'RCH', 'QTR8'] });
 roundTrip('everything changed', c);
 

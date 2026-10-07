@@ -36,5 +36,4 @@
 
 bool config_store_load(AppConfig& c, uint32_t* flags_out);
 bool config_store_save(const AppConfig& c);
-bool config_store_peek_bluetooth(); /* before setup(): is Bluetooth audio on? */
 void config_store_erase();          /* factory reset */

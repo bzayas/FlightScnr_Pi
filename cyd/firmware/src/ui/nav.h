@@ -40,7 +40,6 @@ void detail_open(uint32_t icao);
 void detail_tick();
 void detail_close();
 bool detail_open_now();
-void bt_sheet_open();
 void boot_start(void (*on_done)());   /* calibration (first boot) + disclaimer */
 void calibration_start(void (*on_done)());
 void setup_card_update();             /* Wi-Fi setup hint while unprovisioned */

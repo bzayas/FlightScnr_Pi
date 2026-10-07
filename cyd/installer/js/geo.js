@@ -72,22 +72,3 @@ export function distanceKm(lat1, lon1, lat2, lon2) {
     Math.sin(dLat / 2) ** 2 + Math.cos((lat1 * Math.PI) / 180) * Math.cos((lat2 * Math.PI) / 180) * Math.sin(dLon / 2) ** 2;
   return 2 * R * Math.asin(Math.min(1, Math.sqrt(a)));
 }
-
-let atcCache = null;
-export async function atcAirports(base = 'data/atc_feeds.json') {
-  if (!atcCache)
-    atcCache = fetch(asset(base))
-      .then((r) => (r.ok ? r.json() : { airports: [] }))
-      .then((d) => d.airports || [])
-      .catch(() => []);
-  return atcCache;
-}
-
-export async function nearestAtc(lat, lon, n = 8) {
-  const list = await atcAirports();
-  if (lat === null || lon === null || lat === '' || lon === '') return list.slice(0, n).map((a) => ({ ...a, km: null }));
-  return list
-    .map((a) => ({ ...a, km: distanceKm(+lat, +lon, a.lat, a.lon) }))
-    .sort((a, b) => a.km - b.km)
-    .slice(0, n);
-}

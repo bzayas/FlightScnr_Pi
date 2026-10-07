@@ -29,7 +29,7 @@ CXXFLAGS := $(OPT) $(DEFS) $(INCS) -std=gnu++17 -Wall -Wno-unused-function -Wno-
 
 LVGL_SRC := $(shell find $(LVGL)/src -name '*.c')
 FONT_SRC := $(wildcard $(FW)/src/ui/fonts/*.c)
-APP_SRC  := $(FW)/src/core/config.cpp $(FW)/src/core/commands.cpp \
+APP_SRC  := $(FW)/src/core/config.cpp $(FW)/src/core/commands.cpp $(FW)/src/core/mem_guard.cpp \
             $(wildcard $(FW)/src/data/*.cpp) \
             $(wildcard $(FW)/src/ui/*.cpp) $(wildcard $(FW)/src/ui/screens/*.cpp) \
             $(FW)/src/assets/aircraft_icons.cpp $(FW)/src/assets/airports.cpp \

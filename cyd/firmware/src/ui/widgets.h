@@ -67,6 +67,8 @@ lv_obj_t* w_section(lv_obj_t* page, const char* caption);   /* grouped card */
 lv_obj_t* w_row(lv_obj_t* section, const char* icon, lv_color_t icon_bg, const char* title, const char* value,
                 bool chevron);
 lv_obj_t* w_row_value(lv_obj_t* row);                       /* the right-hand label */
+/* A row whose right side is a control the caller adds (switch, slider...). */
+lv_obj_t* w_row_trailing(lv_obj_t* section, const char* icon, lv_color_t icon_bg, const char* title);
 lv_obj_t* w_switch(lv_obj_t* row, bool on);
 lv_obj_t* w_slider(lv_obj_t* row, int min, int max, int value);
 lv_obj_t* w_button(lv_obj_t* parent, const char* text, bool accent);

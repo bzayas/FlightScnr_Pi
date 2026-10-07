@@ -17,32 +17,61 @@
 #include <esp_heap_caps.h>
 
 #include "assets/ca_bundle.h"
+#include "core/mem_guard.h"
 #include "core/platform.h"
+#include "data/model.h"
 
-/* TLS on this SDK takes two 16 KB record buffers plus the handshake: ~44 KB
- * at its peak. Only start one when that leaves room for the screen and
- * Wi-Fi (an LVGL allocation that fails restarts the device). */
-static const uint32_t TLS_NEED_FREE = (44 + 16) * 1024;
+/* TLS on this SDK takes two 16 KB record buffers plus the handshake and
+ * certificate checks: a device log showed one exhaust 63 KB. It only starts
+ * with that much free, the emergency reserve intact (memory isn't already
+ * short), and nothing else heavy running: page builds wait for it, and it
+ * waits for them (mem_guard). */
+static const uint32_t TLS_NEED_FREE = 72 * 1024;
 static const uint32_t TLS_NEED_BLOCK = 18 * 1024;
 
 static bool tls_fits() {
   return heap_caps_get_free_size(MALLOC_CAP_8BIT) >= TLS_NEED_FREE &&
-         heap_caps_get_largest_free_block(MALLOC_CAP_8BIT) >= TLS_NEED_BLOCK;
+         heap_caps_get_largest_free_block(MALLOC_CAP_8BIT) >= TLS_NEED_BLOCK && mem_guard_reserve_ok();
 }
 
+/* Waits briefly for a page build to finish. */
+static bool take_heavy() {
+  for (int i = 0; i < 25; i++) {
+    if (mem_heavy_try_begin()) return true;
+    vTaskDelay(pdMS_TO_TICKS(20));
+  }
+  return false;
+}
+
+struct HeavyGuard {
+  bool held = false;
+  ~HeavyGuard() {
+    if (held) mem_heavy_end();
+  }
+};
+
 /* Public, keyless feeds that also answer over plain HTTP. When memory is too
- * tight for TLS (e.g. Bluetooth audio is on), these still work. Never add a
- * host that takes an API key or anything private. */
+ * tight for TLS, these still work. Never add a host that takes an API key or
+ * anything private. */
 static const char* const PLAIN_OK[] = {"api.adsb.lol/", "api.open-meteo.com/"};
 
 int http_get(const char* url, HttpBodyFn fn, void* ctx, uint32_t timeout_ms) {
   bool https = strncmp(url, "https://", 8) == 0;
-  char plain_url[320];
-  if (https && !tls_fits()) {
+  char plain_url[512]; /* the Open-Meteo URL alone is ~420 characters */
+  HeavyGuard heavy;
+  if (https) heavy.held = tls_fits() && take_heavy();
+  if (https && heavy.held && !tls_fits()) { /* memory moved while we waited */
+    mem_heavy_end();
+    heavy.held = false;
+  }
+  if (https && !heavy.held) {
     bool ok = false;
     for (const char* h : PLAIN_OK)
       if (strncmp(url + 8, h, strlen(h)) == 0) ok = true;
-    if (!ok || strlen(url) >= sizeof(plain_url)) return HTTP_ERR_LOW_MEMORY;
+    if (!ok || strlen(url) >= sizeof(plain_url)) {
+      g_https_wait_ms = millis() | 1;
+      return HTTP_ERR_LOW_MEMORY;
+    }
     snprintf(plain_url, sizeof(plain_url), "http://%s", url + 8);
     url = plain_url;
     https = false;
@@ -52,6 +81,8 @@ int http_get(const char* url, HttpBodyFn fn, void* ctx, uint32_t timeout_ms) {
       Serial.println("[http] low memory: using plain HTTP for public feeds (adsb.lol, Open-Meteo)");
     }
   }
+  uint32_t low_before = heap_caps_get_minimum_free_size(MALLOC_CAP_8BIT);
+  uint32_t free_before = heap_caps_get_free_size(MALLOC_CAP_8BIT);
 
   WiFiClient plain;
   WiFiClientSecure tls;
@@ -79,6 +110,12 @@ int http_get(const char* url, HttpBodyFn fn, void* ctx, uint32_t timeout_ms) {
     if (!fn(http.getStream(), http.getSize(), ctx)) code = HTTP_ERR_PARSE;
   }
   http.end();
+  if (https) { /* what TLS really costs on this board, when it sets a new low */
+    uint32_t low = heap_caps_get_minimum_free_size(MALLOC_CAP_8BIT);
+    if (low < low_before)
+      Serial.printf("[http] HTTPS %d: free %u KB before, %u KB at its peak\n", code, (unsigned)(free_before / 1024),
+                    (unsigned)(low / 1024));
+  }
   return code;
 }
 

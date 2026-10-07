@@ -32,9 +32,8 @@ extern "C" void plat_lv_assert(void) {
   esp_restart();
 }
 
-/* Keep the Bluetooth controller's RAM only when Bluetooth audio is enabled.
- * Overrides the weak btInUse() that initArduino() consults before setup(). */
-extern "C" bool btInUse() { return config_store_peek_bluetooth(); }
+/* No Bluetooth: initArduino() hands the controller's RAM to the heap. */
+extern "C" bool btInUse() { return false; }
 
 time_t plat_now() {
   time_t t = time(nullptr);

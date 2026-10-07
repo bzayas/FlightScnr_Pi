@@ -26,7 +26,7 @@ import {
   orientClass,
   set,
 } from './schema.js';
-import { browserTimeZone, currentPosition, nearestAtc, placeName, posixFor, searchPlaces, tzNames } from './geo.js';
+import { browserTimeZone, currentPosition, placeName, posixFor, searchPlaces, tzNames } from './geo.js';
 
 /* ---- tiny DOM helper ---------------------------------------------------- */
 
@@ -98,7 +98,6 @@ export const SECTIONS = [
   { id: 'weather', title: 'Weather', icon: 'weather', color: 'var(--teal)' },
   { id: 'flights', title: 'Flights & Radar', icon: 'plane', color: 'var(--orange)' },
   { id: 'face', title: 'Watch Face', icon: 'face', color: 'var(--indigo)' },
-  { id: 'sound', title: 'Sound', icon: 'speaker', color: 'var(--pink)' },
   { id: 'alerts', title: 'Alerts', icon: 'bell', color: 'var(--red)' },
   { id: 'units', title: 'Units', icon: 'units', color: 'var(--gray)' },
   { id: 'display', title: 'Display', icon: 'display', color: 'var(--yellow)' },
@@ -304,7 +303,7 @@ export class SettingsUI {
       this.group(null, [
         ssidRow,
         this.text('Password', 'wifi.pass', { type: 'password', secretFlag: 'wifi.has_pass', placeholder: 'Leave blank for open networks', max: 63 }),
-        this.text('Device name', 'wifi.host', { placeholder: 'flightscnr', help: `Open the device portal at http://${c.wifi.host || 'flightscnr'}.local`, max: 31 }),
+        this.text('Device name', 'wifi.host', { placeholder: 'flightscnr', help: 'The name your router shows for the display.', max: 31 }),
       ], 'If the device can’t join within 45 seconds it opens its own “FlightScnr-XXXX” hotspot. The hotspot password is shown on screen with a QR code, so you can fix settings from your phone.'),
     ];
   }
@@ -662,110 +661,12 @@ export class SettingsUI {
     ];
   }
 
-  /* ---- Sound ---- */
-
-  page_sound() {
-    const c = this.cfg;
-    const bt = h('div');
-    const atc = h('div');
-    const renderBt = () => {
-      if (c.audio.out !== 'bluetooth') return bt.replaceChildren();
-      const rows = [];
-      rows.push(h('div', { class: 'row stack' }, h('div', { class: 'note warn' }, h('span', {}, '⚠️'), h('p', {},
-        h('b', {}, 'Bluetooth audio doesn’t fit on the 2.8″ and 4.0″ boards yet. '),
-        'It needs about 180 KB of free memory alongside Wi-Fi, and these boards (no PSRAM) have about 110 KB. FlightScnr plays through the built-in speaker instead, and says so on the display.'))));
-      const cur = c.audio.bt_name || c.audio.bt_mac;
-      rows.push(this.row('Speaker', cur ? c.audio.bt_mac : 'None paired yet', h('span', { class: 'value' }, c.audio.bt_name || (cur ? 'Unnamed' : '—'))));
-      const saved = this.api.saved?.();
-      if (this.portal && saved && saved.audio.out !== 'bluetooth') {
-        rows.push(h('div', { class: 'row stack' }, h('div', { class: 'note' }, h('span', {}, 'ℹ️'), h('p', {}, 'Save to turn Bluetooth on. The display restarts once to make room for the radio, then come back here to pair a speaker.'))));
-      } else if (this.portal && this.api.btScan) {
-        const results = h('ul', { class: 'results' });
-        const scan = h('button', {
-          type: 'button',
-          class: 'btn small',
-          onclick: async () => {
-            scan.disabled = true;
-            scan.textContent = 'Searching…';
-            try {
-              await this.api.btScan();
-              for (let i = 0; i < 6; i++) {
-                await new Promise((r) => setTimeout(r, 2000));
-                const list = await this.api.btResults();
-                results.replaceChildren(...list.map((d) => h('li', {
-                  onclick: async () => {
-                    await this.api.action('bt_select', { name: d.name, mac: d.mac });
-                    c.audio.bt_name = d.name;
-                    c.audio.bt_mac = d.mac;
-                    toast(`Connecting to ${d.name || d.mac}…`);
-                    renderBt();
-                  },
-                }, h('span', {}, d.name || 'Unnamed device'), h('span', { class: 'muted' }, `${d.rssi} dBm`))));
-              }
-            } catch (e) {
-              toast(e.message);
-            }
-            scan.disabled = false;
-            scan.textContent = 'Search again';
-          },
-        }, 'Find speakers');
-        rows.push(h('div', { class: 'row stack' }, h('div', { class: 'btns' }, scan, h('small', { class: 'muted' }, 'Put the speaker in pairing mode first.')), results));
-        if (cur) rows.push(h('div', { class: 'row' }, h('button', { type: 'button', class: 'btn small danger', onclick: async () => { await this.api.action('bt_forget'); c.audio.bt_name = ''; c.audio.bt_mac = ''; renderBt(); } }, 'Forget this speaker')));
-      }
-      bt.replaceChildren(this.group('Bluetooth speaker', rows, this.portal
-        ? 'Switching to Bluetooth restarts the device once to free memory for the radio. Works with A2DP speakers and headphones that pair without a PIN or with 0000.'
-        : 'Pair after installing: on the device open Settings → Sound → Bluetooth, put your speaker in pairing mode and tap it. FlightScnr reconnects to it automatically after that. Most A2DP speakers and headphones work; the onboard speaker is used whenever Bluetooth isn’t connected.'));
-    };
-    const renderAtc = async () => {
-      const list = await nearestAtc(c.loc.lat, c.loc.lon, 6);
-      const opts = [{ v: '', t: 'None', label: '' }];
-      for (const a of list) for (const f of a.feeds) opts.push({ v: f.m, t: `${f.l}${a.km !== null ? ` · ${Math.round(a.km)} km` : ''}`, label: f.l });
-      if (c.audio.atc && !opts.some((o) => o.v === c.audio.atc)) opts.push({ v: c.audio.atc, t: c.audio.atc_label || c.audio.atc, label: c.audio.atc_label });
-      atc.replaceChildren(this.group('LiveATC', [
-        this.select('Tower feed', 'audio.atc', opts.map(({ v, t }) => ({ v, t })), c.loc.lat === null ? 'Set your location to see nearby airports.' : 'The nearest airports with a LiveATC feed.', {
-          onPick: (v) => {
-            c.audio.atc_label = (opts.find((o) => o.v === v) || {}).label || '';
-            this.changed('audio.atc_label');
-          },
-        }),
-        this.slider('ATC volume', 'audio.vol_atc'),
-      ], 'Tap the LiveATC complication or Settings → Sound to listen. Streams come from LiveATC.net and are for personal listening only. Alerts duck the audio while they play.'));
-    };
-    renderBt();
-    renderAtc();
-    const testRow = this.portal && this.api.action
-      ? h('div', { class: 'row' }, h('div', { class: 'btns' },
-        h('button', { type: 'button', class: 'btn small', onclick: () => this.api.action('test_chime') }, 'Play chime'),
-        h('button', { type: 'button', class: 'btn small', onclick: () => this.api.action('test_alert') }, 'Play alert'),
-        h('button', { type: 'button', class: 'btn small', onclick: () => this.api.action('atc_toggle') }, 'Start / stop ATC')))
-      : null;
-    const hours = Array.from({ length: 24 }, (_, i) => ({ v: i, t: c.units.clock24 ? `${String(i).padStart(2, '0')}:00` : `${((i + 11) % 12) + 1} ${i < 12 ? 'AM' : 'PM'}` }));
-    return [
-      this.header('Sound', 'Chimes, alert sounds and live tower audio, through the built-in speaker or a Bluetooth speaker.'),
-      this.group('Output', [
-        this.seg('Play sound through', 'audio.out', [{ v: 'off', t: 'Off' }, { v: 'speaker', t: 'Speaker' }, { v: 'bluetooth', t: 'Bluetooth' }], null, { onPick: renderBt }),
-        this.slider('Volume', 'audio.vol'),
-        testRow,
-      ], 'The CYD’s speaker connector needs a small 8 Ω speaker.'),
-      bt,
-      this.group('Chimes & alerts', [
-        this.toggle('Hourly chime', 'audio.chime'),
-        this.slider('Chime volume', 'audio.vol_chime'),
-        this.slider('Alert volume', 'audio.vol_alert'),
-        this.toggle('Quiet hours', 'audio.quiet', 'No chimes or alert sounds overnight. Visual alerts still show.'),
-        this.select('Quiet from', 'audio.quiet_start', hours),
-        this.select('Quiet until', 'audio.quiet_end', hours),
-      ]),
-      atc,
-    ];
-  }
-
   /* ---- Alerts ---- */
 
   page_alerts() {
     const c = this.cfg;
     return [
-      this.header('Alerts', 'A banner slides in (with a sound if enabled) when something interesting enters your radar.'),
+      this.header('Alerts', 'A banner slides in when something interesting enters your radar.'),
       this.group('Notify me about', [
         this.toggle('Emergencies', 'alerts.emergency', 'Squawk 7500, 7600 or 7700.'),
         this.toggle('Military aircraft', 'alerts.military'),

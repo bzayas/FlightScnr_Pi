@@ -17,7 +17,6 @@
 #include <WiFi.h>
 
 #include "assets/portal_assets.h"
-#include "audio/audio.h"
 #include "core/board.h"
 #include "core/commands.h"
 #include "core/config.h"
@@ -85,8 +84,7 @@ static void handle_post_config() {
   JsonDocument doc;
   doc["ok"] = true;
   doc["reboot"] = probe["face"]["rotation"].is<int>() || probe["display"]["spi80"].is<bool>() ||
-                  probe["display"]["board"].is<const char*>() ||
-                  probe["audio"]["out"].is<const char*>();
+                  probe["display"]["board"].is<const char*>();
   send_json(200, doc);
 }
 
@@ -126,14 +124,6 @@ static void handle_status() {
     x["updated"] = (long)g_model.wx.updated;
     x["error"] = g_model.wx_err;
   }
-  AudioStatus as;
-  audio_get_status(&as);
-  JsonObject a = doc["audio"].to<JsonObject>();
-  a["out"] = as.out;
-  a["bt_state"] = as.bt_state;
-  a["bt_peer"] = as.bt_peer;
-  a["atc"] = as.atc_playing;
-  a["error"] = as.err;
   send_json(200, doc);
 }
 
@@ -157,27 +147,6 @@ static void handle_scan() {
   send_json(200, doc);
 }
 
-static void handle_bt() {
-  BtDevice list[12];
-  int n = audio_bt_results(list, 12);
-  JsonDocument doc;
-  JsonArray arr = doc["devices"].to<JsonArray>();
-  for (int i = 0; i < n; i++) {
-    JsonObject o = arr.add<JsonObject>();
-    char mac[18];
-    snprintf(mac, sizeof(mac), "%02X:%02X:%02X:%02X:%02X:%02X", list[i].mac[0], list[i].mac[1], list[i].mac[2],
-             list[i].mac[3], list[i].mac[4], list[i].mac[5]);
-    o["name"] = list[i].name;
-    o["mac"] = mac;
-    o["rssi"] = list[i].rssi;
-  }
-  AudioStatus as;
-  audio_get_status(&as);
-  doc["state"] = as.bt_state;
-  doc["peer"] = as.bt_peer;
-  send_json(200, doc);
-}
-
 static void handle_action() {
   JsonDocument in;
   if (!server.hasArg("plain") || deserializeJson(in, server.arg("plain"))) return send_error(400, "invalid JSON");
@@ -189,21 +158,7 @@ static void handle_action() {
   else if (!strcmp(what, "factory_reset")) ok = ui_post_cmd(UICMD_FACTORY_RESET);
   else if (!strcmp(what, "identify")) ok = ui_post_cmd(UICMD_IDENTIFY);
   else if (!strcmp(what, "refresh")) net_refresh(NET_REFRESH_ALL);
-  else if (!strcmp(what, "test_chime")) audio_test(SND_CHIME);
-  else if (!strcmp(what, "test_alert")) audio_test(SND_TRAFFIC);
-  else if (!strcmp(what, "atc_toggle")) audio_atc_toggle();
-  else if (!strcmp(what, "bt_scan")) audio_bt_scan();
-  else if (!strcmp(what, "bt_forget")) audio_bt_forget();
-  else if (!strcmp(what, "bt_select")) {
-    BtDevice d;
-    memset(&d, 0, sizeof(d));
-    snprintf(d.name, sizeof(d.name), "%s", in["name"] | "");
-    unsigned m[6];
-    if (sscanf(in["mac"] | "", "%x:%x:%x:%x:%x:%x", &m[0], &m[1], &m[2], &m[3], &m[4], &m[5]) != 6)
-      return send_error(400, "bad mac");
-    for (int i = 0; i < 6; i++) d.mac[i] = (uint8_t)m[i];
-    audio_bt_select(d);
-  } else
+  else
     return send_error(400, "unknown action");
   JsonDocument doc;
   doc["ok"] = ok;
@@ -259,7 +214,6 @@ void portal_init() {
   server.on("/api/config", HTTP_POST, handle_post_config);
   server.on("/api/status", HTTP_GET, handle_status);
   server.on("/api/scan", HTTP_GET, handle_scan);
-  server.on("/api/bt", HTTP_GET, handle_bt);
   server.on("/api/action", HTTP_POST, handle_action);
   server.on("/api/wifi", HTTP_POST, handle_wifi);
   /* OS captive-portal probes -> the setup page. */
@@ -271,5 +225,5 @@ void portal_init() {
   }
   server.onNotFound(handle_not_found);
   server.begin();
-  xTaskCreatePinnedToCore(portal_task, "portal", 6144, nullptr, 2, nullptr, 0);
+  xTaskCreatePinnedToCore(portal_task, "portal", 5120, nullptr, 2, nullptr, 0); /* ~1 KB used in device logs */
 }

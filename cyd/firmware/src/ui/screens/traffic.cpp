@@ -39,7 +39,9 @@ struct Item {
 static lv_obj_t* s_page;
 static lv_obj_t* s_header;
 static lv_obj_t* s_card;
-static lv_obj_t* s_rows[ROWS];
+/* One object draws every row (40 row objects cost ~16 KB of RAM). */
+static lv_obj_t* s_list;
+static int s_pressed = -1;
 static Item s_items[ROWS];
 static int s_n;
 static uint32_t s_gen, s_theme;
@@ -72,22 +74,12 @@ static void t(lv_draw_ctx_t* dc, const char* s, const lv_font_t* f, lv_color_t c
   dc->clip_area = saved;
 }
 
-static void row_event(lv_event_t* e) {
-  lv_obj_t* o = lv_event_get_target(e);
-  int i = (int)(intptr_t)lv_obj_get_user_data(o);
-  if (i >= s_n) return;
+static int row_h() { return ui_compact() ? 42 : 50; }
+
+static void draw_row(lv_draw_ctx_t* dc, Fx& f, int i, const lv_area_t& a) {
   const Item& it = s_items[i];
-  if (lv_event_get_code(e) == LV_EVENT_SHORT_CLICKED) {
-    nav_show_flight(it.f.icao);
-    return;
-  }
-  lv_draw_ctx_t* dc = lv_event_get_draw_ctx(e);
-  Fx f;
-  if (!fx_begin(dc, f)) return;
   const Palette& p = pal();
-  lv_area_t a;
-  lv_obj_get_coords(o, &a);
-  if (lv_obj_has_state(o, LV_STATE_PRESSED)) fx_fill_rect(f, a.x1, a.y1, a.x2, a.y2, p.sep, 255);
+  if (i == s_pressed) fx_fill_rect(f, a.x1, a.y1, a.x2, a.y2, p.sep, 255);
   /* 2.8": narrower icon column and smaller type */
   const bool cp = ui_compact();
   const int tx = cp ? 40 : 52, pr = cp ? 8 : 12, y2 = cp ? 22 : 26;
@@ -135,21 +127,64 @@ static void row_event(lv_event_t* e) {
   t(dc, right2, f2, it.f.vs_fpm < -64 ? p.tag_down : p.text2, a.x2 - pr, a.y1 + y2, LV_TEXT_ALIGN_RIGHT);
 }
 
+static lv_area_t row_area(int i) {
+  lv_area_t a;
+  lv_obj_get_coords(s_list, &a);
+  a.y1 += i * row_h();
+  a.y2 = a.y1 + row_h() - 1;
+  return a;
+}
+
+static int row_at_pointer() {
+  lv_indev_t* in = lv_indev_get_act();
+  if (!in) return -1;
+  lv_point_t pt;
+  lv_indev_get_point(in, &pt);
+  lv_area_t a;
+  lv_obj_get_coords(s_list, &a);
+  int i = (pt.y - a.y1) / row_h();
+  return i >= 0 && i < s_n ? i : -1;
+}
+
+static void list_event(lv_event_t* e) {
+  lv_event_code_t code = lv_event_get_code(e);
+  if (code == LV_EVENT_DRAW_MAIN) {
+    lv_draw_ctx_t* dc = lv_event_get_draw_ctx(e);
+    Fx f;
+    if (!fx_begin(dc, f)) return;
+    for (int i = 0; i < s_n; i++) {
+      lv_area_t a = row_area(i);
+      if (a.y2 < dc->clip_area->y1 || a.y1 > dc->clip_area->y2) continue;
+      draw_row(dc, f, i, a);
+    }
+  } else if (code == LV_EVENT_PRESSED) {
+    s_pressed = row_at_pointer();
+    if (s_pressed >= 0) {
+      lv_area_t a = row_area(s_pressed);
+      lv_obj_invalidate_area(s_list, &a);
+    }
+  } else if (code == LV_EVENT_RELEASED || code == LV_EVENT_PRESS_LOST) {
+    if (s_pressed >= 0) {
+      lv_area_t a = row_area(s_pressed);
+      lv_obj_invalidate_area(s_list, &a);
+    }
+    s_pressed = -1;
+  } else if (code == LV_EVENT_SHORT_CLICKED) {
+    int i = row_at_pointer();
+    if (i >= 0) nav_show_flight(s_items[i].f.icao);
+  }
+}
+
 lv_obj_t* traffic_create(lv_obj_t* parent) {
   s_page = w_page(parent, "Traffic");
   s_header = w_label(s_page, "", ui_compact() ? &fs_text_12 : &fs_text_14, &ST_TEXT2);
   s_card = w_section(s_page, nullptr);
-  for (int i = 0; i < ROWS; i++) {
-    lv_obj_t* r = lv_obj_create(s_card);
-    lv_obj_remove_style_all(r);
-    lv_obj_set_size(r, LV_PCT(100), ui_compact() ? 42 : 50);
-    lv_obj_add_flag(r, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_HIDDEN);
-    lv_obj_clear_flag(r, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_set_user_data(r, (void*)(intptr_t)i);
-    lv_obj_add_event_cb(r, row_event, LV_EVENT_DRAW_MAIN, nullptr);
-    lv_obj_add_event_cb(r, row_event, LV_EVENT_SHORT_CLICKED, nullptr);
-    s_rows[i] = r;
-  }
+  s_list = lv_obj_create(s_card);
+  lv_obj_remove_style_all(s_list);
+  lv_obj_set_size(s_list, LV_PCT(100), row_h());
+  lv_obj_clear_flag(s_list, LV_OBJ_FLAG_SCROLLABLE);
+  lv_obj_add_event_cb(s_list, list_event, LV_EVENT_ALL, nullptr);
+  s_pressed = -1;
   s_gen = s_theme = 0;
   s_empty = w_label(s_page, "No aircraft in range right now.", &fs_text_16, &ST_TEXT2);
   lv_obj_set_style_pad_top(s_empty, 20, 0);
@@ -157,8 +192,8 @@ lv_obj_t* traffic_create(lv_obj_t* parent) {
 }
 
 void traffic_release() {
-  s_page = s_header = s_card = s_empty = nullptr;
-  memset(s_rows, 0, sizeof(s_rows));
+  s_page = s_header = s_card = s_list = s_empty = nullptr;
+  s_pressed = -1;
   s_n = 0;
   s_gen = s_theme = 0; /* rebuild shows fresh data straight away */
 }
@@ -204,13 +239,9 @@ void traffic_tick() {
   }
   s_gen = gen;
   s_theme = theme_rev();
-  for (int i = 0; i < ROWS; i++) {
-    if (i < s_n)
-      lv_obj_clear_flag(s_rows[i], LV_OBJ_FLAG_HIDDEN);
-    else
-      lv_obj_add_flag(s_rows[i], LV_OBJ_FLAG_HIDDEN);
-  }
-  lv_obj_invalidate(s_card);
+  s_pressed = -1;
+  lv_obj_set_height(s_list, LV_MAX(1, s_n) * row_h());
+  lv_obj_invalidate(s_list);
   char range[16], hdr[96];
   fmt_dist((float)g_cfg.range_nm, range, sizeof(range));
   if (feed.ok)

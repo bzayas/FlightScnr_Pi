@@ -18,6 +18,7 @@
 
 #include "complications.h"
 #include "core/commands.h"
+#include "core/mem_guard.h"
 #include "core/config.h"
 #include "core/platform.h"
 #include "data/alerts.h"
@@ -50,20 +51,52 @@ static char s_auto_tz[24];
 /* Navigation                                                                */
 /* ------------------------------------------------------------------------ */
 
-/* Traffic and Settings are built on demand and freed when you leave them:
- * Settings alone is ~55 KB of LVGL objects on the device, and with Bluetooth
- * audio reserving its RAM, building everything at boot left too little for
- * Wi-Fi to start. Sky and the face are always present. */
+/* Traffic and Settings are built on demand and freed when you leave them,
+ * so their LVGL objects only take RAM while you look at them. Sky and the
+ * face are always present. */
 static bool s_built[PAGE_COUNT] = {true, true, false, false};
+
+/* A page build waits while an HTTPS request holds memory (mem_guard): LVGL
+ * crashes if an allocation fails halfway through. The tile stays empty
+ * for that moment, then fills in. */
+static const uint32_t PAGE_MIN_FREE = 36 * 1024;
+static uint8_t s_deferred; /* bit per page */
+static lv_timer_t* s_defer_timer;
+
+static bool page_near(uint8_t pg) {
+  uint8_t cur = nav_current();
+  return pg == cur || pg + 1 == cur || pg == cur + 1;
+}
+
+static void page_build(uint8_t pg);
+
+static void deferred_cb(lv_timer_t*) {
+  uint8_t want = s_deferred;
+  s_deferred = 0;
+  for (uint8_t pg = 0; pg < PAGE_COUNT; pg++)
+    if ((want & (1u << pg)) && page_near(pg)) page_build(pg);
+  if (!s_deferred && s_defer_timer) {
+    lv_timer_del(s_defer_timer);
+    s_defer_timer = nullptr;
+  }
+}
 
 static void page_build(uint8_t pg) {
   if (pg >= PAGE_COUNT || s_built[pg] || !s_tiles[pg]) return;
+  if (pg != PAGE_TRAFFIC && pg != PAGE_SETTINGS) return;
+  bool mine = mem_heavy_try_begin();
+  if (!mine || !mem_guard_reserve_ok() || plat_free_heap() < PAGE_MIN_FREE) {
+    if (mine) mem_heavy_end();
+    s_deferred |= (uint8_t)(1u << pg);
+    if (!s_defer_timer) s_defer_timer = lv_timer_create(deferred_cb, 250, nullptr);
+    return;
+  }
+  plat_mem_mark("page");
   if (pg == PAGE_TRAFFIC)
     traffic_create(s_tiles[pg]);
-  else if (pg == PAGE_SETTINGS)
-    settings_create(s_tiles[pg]);
   else
-    return;
+    settings_create(s_tiles[pg]);
+  mem_heavy_end();
   s_built[pg] = true;
   plat_mem_mark(pg == PAGE_TRAFFIC ? "+traffic" : "+settings");
 }
@@ -606,8 +639,8 @@ void ui_tick() {
   bool new_second = sec != s_last_tick_s;
   if (new_second) {
     s_last_tick_s = sec;
+    mem_guard_service();
     comp_refresh_context();
-    alerts_tick(now);
     auto_timezone();
     if (s_ready) {
       face_tick(true);

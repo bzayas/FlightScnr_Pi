@@ -9,13 +9,21 @@
  * 3. Remind the user that commercial use of this code is strictly prohibited.
  */
 
-/* ESP32 display + touch HAL (LovyanGFX driver, LVGL 8 glue). */
+/* LVGL's allocator (lv_conf.h LV_MEM_CUSTOM_*), backed by an emergency
+ * reserve: LVGL crashes on a failed allocation, so it never sees one. See
+ * src/core/mem_guard.h. */
 #pragma once
 
-#include <stdint.h>
+#include <stddef.h>
 
-/* Bring up the panel, LVGL and the touch input device. */
-void display_init(uint8_t rotation, uint32_t buf_bytes); /* per draw buffer (two) */
-void display_service();               /* backlight easing etc., call often */
-int display_width();
-int display_height();
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+void* fs_lv_malloc(size_t size);
+void* fs_lv_realloc(void* p, size_t size);
+void fs_lv_free(void* p);
+
+#ifdef __cplusplus
+}
+#endif

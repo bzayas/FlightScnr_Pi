@@ -29,8 +29,7 @@ static long constrain_long(long v, long lo, long hi) { return v < lo ? lo : (v >
 static const char* const COMP_KEYS[COMP_COUNT] = {
     "none",     "time",     "date",     "weather",  "temp_range", "forecast", "sun",
     "sunrise",  "sunset",   "daylight", "moon",     "wind",       "humidity", "uv",
-    "aircraft", "nearest",  "highest",  "fastest",  "tracked",    "quake",    "audio",
-    "status",
+    "aircraft", "nearest",  "highest",  "fastest",  "tracked",    "quake",    "status",
 };
 static const char* const LAYOUT_KEYS[LAYOUT_COUNT] = {"infograph", "modular", "focus"};
 static const char* const SOURCE_KEYS[SRC_COUNT] = {"", "adsbfi", "airplaneslive", "adsblol", "dump1090"};
@@ -121,15 +120,6 @@ void cfg_defaults(AppConfig& c) {
   c.bgr = true;
   c.spi80 = false;
   c.board = 0; /* auto */
-  c.audio_out = AUDIO_SPEAKER;
-  c.vol_master = 70;
-  c.vol_chime = 60;
-  c.vol_alert = 80;
-  c.vol_atc = 80;
-  c.chime = false;
-  c.quiet = true;
-  c.quiet_start = 22;
-  c.quiet_end = 7;
   c.al_military = true;
   c.al_emergency = true;
   c.al_tracked = true;
@@ -194,16 +184,8 @@ static const char* const ALT_NAMES[] = {"m", "ft"};
 static const char* const SPEED_NAMES[] = {"kmh", "mph", "kt", "ms"};
 static const char* const LABEL_NAMES[] = {"off", "nearest", "all"};
 static const char* const PCOLOR_NAMES[] = {"theme", "altitude"};
-static const char* const AUDIO_NAMES[] = {"off", "speaker", "bluetooth"};
 /* BoardId order (core/board.h) */
 static const char* const BOARD_NAMES[] = {"auto", "cyd28", "cyd28usbc", "e32r40t"};
-
-static bool parse_mac(const char* s, uint8_t out[6]) {
-  unsigned v[6];
-  if (!s || sscanf(s, "%2x:%2x:%2x:%2x:%2x:%2x", &v[0], &v[1], &v[2], &v[3], &v[4], &v[5]) != 6) return false;
-  for (int i = 0; i < 6; i++) out[i] = (uint8_t)v[i];
-  return true;
-}
 
 bool cfg_apply_json(AppConfig& c, const char* json, size_t len, bool keep_blank) {
   JsonDocument doc;
@@ -303,23 +285,6 @@ bool cfg_apply_json(AppConfig& c, const char* json, size_t len, bool keep_blank)
     get_bool(d["bgr"], c.bgr);
     get_bool(d["spi80"], c.spi80);
     get_enum(d["board"], c.board, BOARD_NAMES, 4);
-  }
-
-  JsonObjectConst a = root["audio"];
-  if (!a.isNull()) {
-    get_enum(a["out"], c.audio_out, AUDIO_NAMES, 3);
-    get_str(a["bt_name"], c.bt_name);
-    if (a["bt_mac"].is<const char*>()) c.bt_has_mac = parse_mac(a["bt_mac"], c.bt_mac);
-    get_int(a["vol"], c.vol_master, 0, 100);
-    get_int(a["vol_chime"], c.vol_chime, 0, 100);
-    get_int(a["vol_alert"], c.vol_alert, 0, 100);
-    get_int(a["vol_atc"], c.vol_atc, 0, 100);
-    get_bool(a["chime"], c.chime);
-    get_bool(a["quiet"], c.quiet);
-    get_int(a["quiet_start"], c.quiet_start, 0, 23);
-    get_int(a["quiet_end"], c.quiet_end, 0, 23);
-    get_str(a["atc"], c.atc_mount);
-    get_str(a["atc_label"], c.atc_label);
   }
 
   JsonObjectConst al = root["alerts"];
@@ -428,28 +393,6 @@ size_t cfg_to_json(const AppConfig& c, char* out, size_t cap, bool secrets) {
   d["bgr"] = c.bgr;
   d["spi80"] = c.spi80;
   d["board"] = BOARD_NAMES[c.board % 4];
-
-  JsonObject a = doc["audio"].to<JsonObject>();
-  a["out"] = AUDIO_NAMES[c.audio_out % 3];
-  a["bt_name"] = c.bt_name;
-  if (c.bt_has_mac) {
-    char mac[18];
-    snprintf(mac, sizeof(mac), "%02X:%02X:%02X:%02X:%02X:%02X", c.bt_mac[0], c.bt_mac[1], c.bt_mac[2], c.bt_mac[3],
-             c.bt_mac[4], c.bt_mac[5]);
-    a["bt_mac"] = mac;
-  } else {
-    a["bt_mac"] = "";
-  }
-  a["vol"] = c.vol_master;
-  a["vol_chime"] = c.vol_chime;
-  a["vol_alert"] = c.vol_alert;
-  a["vol_atc"] = c.vol_atc;
-  a["chime"] = c.chime;
-  a["quiet"] = c.quiet;
-  a["quiet_start"] = c.quiet_start;
-  a["quiet_end"] = c.quiet_end;
-  a["atc"] = c.atc_mount;
-  a["atc_label"] = c.atc_label;
 
   JsonObject al = doc["alerts"].to<JsonObject>();
   al["military"] = c.al_military;

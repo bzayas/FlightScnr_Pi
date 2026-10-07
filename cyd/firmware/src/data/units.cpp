@@ -263,3 +263,28 @@ const char* wx_name(uint8_t c) {
       "Thunderstorms"};
   return c < WXC_COUNT ? names[c] : names[0];
 }
+
+size_t fmt_strftime(char* out, size_t n, const char* fmt, const struct tm* t) {
+  char f[96];
+  size_t j = 0;
+  for (size_t i = 0; fmt[i] && j + 8 < sizeof(f); i++) {
+    if (fmt[i] == '%' && fmt[i + 1] == '%') { /* keep "%%" as it is */
+      f[j++] = fmt[i++];
+      f[j++] = fmt[i];
+      continue;
+    }
+    if (fmt[i] == '%' && fmt[i + 1] == '-' && fmt[i + 2]) {
+      char c = fmt[i + 2];
+      int v = c == 'd' ? t->tm_mday : c == 'm' ? t->tm_mon + 1 : c == 'H' ? t->tm_hour
+              : c == 'I' ? (t->tm_hour + 11) % 12 + 1 : c == 'M' ? t->tm_min : -1;
+      if (v >= 0) {
+        j += (size_t)snprintf(f + j, sizeof(f) - j, "%d", v);
+        i += 2;
+        continue;
+      }
+    }
+    f[j++] = fmt[i];
+  }
+  f[j] = 0;
+  return strftime(out, n, f, t);
+}

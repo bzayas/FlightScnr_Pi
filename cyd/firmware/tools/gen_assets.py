@@ -11,13 +11,11 @@
 """Build the CYD firmware + installer assets from the FlightScnr Pi data.
 
 Everything here is derived from files already in this repository, so the
-CYD port shares the Pi project's aircraft silhouettes, alert sounds, runway
-data and LiveATC feed list instead of re-inventing them:
+CYD port shares the Pi project's aircraft silhouettes and runway data
+instead of re-inventing them:
 
   flightscnr/assets/aircraft/icons/*.png   -> src/assets/aircraft_icons.cpp
-  flightscnr/assets/*.mp3                  -> src/assets/sounds.cpp
   flightscnr/assets/data/runways.csv       -> src/assets/airports.cpp
-  flightscnr/assets/atc/*.json + runways   -> installer/data/atc_feeds.json
   /usr/share/zoneinfo (TZif footers)       -> installer/js/tz_posix.js
   certifi (Mozilla CA list)                -> src/assets/ca_bundle.cpp
 
@@ -228,63 +226,6 @@ extern const uint16_t AIRCRAFT_TYPES_COUNT;
 
 
 # ---------------------------------------------------------------------------
-# Alert / chime sounds (the Pi's own MP3s, ID3 tags stripped)
-# ---------------------------------------------------------------------------
-
-SOUNDS = [
-    ("SND_CHIME", "ding.mp3", "Hourly chime"),
-    ("SND_TRAFFIC", "traffic.mp3", "Tracked / watch-list aircraft in range"),
-    ("SND_MILITARY", "airbus_autopilot.mp3", "Military aircraft sighting"),
-    ("SND_QUAKE", "earthquake_voice.mp3", "Nearby earthquake"),
-]
-
-
-def _strip_id3(data: bytes) -> bytes:
-    if data[:3] == b"ID3" and len(data) > 10:
-        size = (data[6] << 21) | (data[7] << 14) | (data[8] << 7) | data[9]
-        footer = 10 if data[5] & 0x10 else 0
-        data = data[10 + size + footer :]
-    if len(data) > 128 and data[-128:-125] == b"TAG":
-        data = data[:-128]
-    # Skip to the first MPEG frame sync.
-    for i in range(min(len(data) - 1, 4096)):
-        if data[i] == 0xFF and (data[i + 1] & 0xE0) == 0xE0:
-            return data[i:]
-    return data
-
-
-def gen_sounds() -> None:
-    hdr = HEADER + """
-#pragma once
-#include <stddef.h>
-#include <stdint.h>
-
-// MP3 clips reused from flightscnr/assets (decoded on-device by minimp3).
-enum SoundId : uint8_t {
-"""
-    for i, (ident, _, desc) in enumerate(SOUNDS):
-        hdr += f"  {ident} = {i},  // {desc}\n"
-    hdr += f"  SND_COUNT = {len(SOUNDS)}\n}};\n\n"
-    hdr += """struct SoundClip {
-  const uint8_t* data;
-  size_t len;
-};
-
-extern const SoundClip SOUND_CLIPS[SND_COUNT];
-"""
-    write(OUT_SRC / "sounds.h", hdr)
-    src = HEADER + '\n#include "sounds.h"\n\n'
-    for ident, fname, _ in SOUNDS:
-        data = _strip_id3((PI_ASSETS / fname).read_bytes())
-        src += f"static const uint8_t {ident}_MP3[{len(data)}] = {{\n{c_bytes(data)}\n}};\n\n"
-    src += "const SoundClip SOUND_CLIPS[SND_COUNT] = {\n"
-    for ident, _, _ in SOUNDS:
-        src += f"  {{{ident}_MP3, sizeof({ident}_MP3)}},\n"
-    src += "};\n"
-    write(OUT_SRC / "sounds.cpp", src)
-
-
-# ---------------------------------------------------------------------------
 # Airports + runway centerlines (OurAirports runways.csv already in the repo)
 # ---------------------------------------------------------------------------
 
@@ -397,44 +338,6 @@ extern const RunwayRec RUNWAYS[];
           f"(~{(len(airports) * 16 + idx * 8) / 1024:.0f} KB flash)")
 
 
-def gen_atc_feeds(runways) -> None:
-    centers = airport_centers(runways)
-    seed = json.loads((PI_ASSETS / "atc" / "atc_stations_seed.json").read_text())["airports"]
-    index = json.loads((PI_ASSETS / "atc" / "atc_feeds_index.json").read_text())["airports"]
-    out = []
-    for icao in sorted(set(seed) | set(index)):
-        feeds = []
-        seen = set()
-        name = ""
-        if icao in seed:
-            name = seed[icao].get("name", "")
-            for f in seed[icao].get("feeds", []):
-                if f["mount"] not in seen:
-                    seen.add(f["mount"])
-                    feeds.append({"m": f["mount"], "l": f.get("label", f["mount"]), "k": f.get("kind", "")})
-        for f in index.get(icao, []):
-            if f["mount"] not in seen:
-                seen.add(f["mount"])
-                feeds.append({"m": f["mount"], "l": f.get("label", f["mount"]), "k": f.get("kind", "")})
-        c = centers.get(icao)
-        out.append({
-            "icao": icao,
-            "name": name,
-            "lat": round(c[0], 4) if c else None,
-            "lon": round(c[1], 4) if c else None,
-            "feeds": feeds,
-        })
-    doc = {
-        "_comment": "Generated from flightscnr/assets/atc (LiveATC mounts). "
-                    "Stream: http(s)://d.liveatc.net/<mount>. Personal listening only.",
-        "airports": out,
-    }
-    path = INSTALLER / "data" / "atc_feeds.json"
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(doc, separators=(",", ":")), encoding="utf-8")
-    print(f"  wrote {path.relative_to(ROOT)} ({len(out)} airports)")
-
-
 # ---------------------------------------------------------------------------
 # IANA -> POSIX TZ strings (TZif v2+ footer), for the installer + portal
 # ---------------------------------------------------------------------------
@@ -512,10 +415,8 @@ extern const size_t CA_BUNDLE_LEN;
 
 def main() -> int:
     print("aircraft icons");  gen_aircraft_icons()
-    print("sounds");          gen_sounds()
     runways = load_runways()
     print("airports");        gen_airports(runways)
-    print("atc feeds");       gen_atc_feeds(runways)
     print("time zones");      gen_tz()
     print("ca bundle");       gen_ca_bundle()
     return 0

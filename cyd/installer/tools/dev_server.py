@@ -38,8 +38,6 @@ CONFIG = {
               "ground": False, "min_alt": 0, "max_alt": 0, "poll": 8, "dump1090": "", "sources": ["adsbfi", "airplaneslive", "adsblol"]},
     "face": {"rotation": 0, "theme": "auto", "accent": [0, 255, 0], "layout": {"p": "infograph", "l": "infograph"}, "slots": {}},
     "display": {"bright_day": 100, "bright_night": 35, "invert": False, "bgr": True, "spi80": False},
-    "audio": {"out": "speaker", "bt_name": "", "bt_mac": "", "vol": 70, "vol_chime": 60, "vol_alert": 80, "vol_atc": 80,
-              "chime": False, "quiet": True, "quiet_start": 22, "quiet_end": 7, "atc": "ksfo_twr", "atc_label": "KSFO Tower"},
     "alerts": {"military": True, "emergency": True, "tracked": True, "watch_on": True, "quake": False, "quake_min": 3,
                "quake_km": 250, "track": "", "watch": ["UAL1"]},
 }
@@ -86,13 +84,10 @@ class Handler(SimpleHTTPRequestHandler):
                 "time": {"synced": True, "epoch": int(time.time()), "tz": CONFIG["loc"]["posix"]},
                 "feed": {"ok": True, "source": "adsb.fi", "age_s": 4, "aircraft": 16, "error": ""},
                 "weather": {"ok": True, "provider": "Open-Meteo", "temp_c": 18.4, "updated": int(time.time()) - 300, "error": ""},
-                "audio": {"out": {"off": 0, "speaker": 1, "bluetooth": 2}[CONFIG["audio"]["out"]], "bt_state": 5, "bt_peer": CONFIG["audio"]["bt_name"], "atc": False, "error": ""},
             })
         if self.path == "/api/scan":
             time.sleep(1.2)
             return self.send_json({"networks": [{"ssid": "HomeWiFi", "rssi": -52, "secure": True}, {"ssid": "Neighbours", "rssi": -80, "secure": True}, {"ssid": "Cafe", "rssi": -71, "secure": False}]})
-        if self.path == "/api/bt":
-            return self.send_json({"devices": [{"name": "JBL Flip 6", "mac": "11:22:33:44:55:66", "rssi": -48}, {"name": "Bose SoundLink", "mac": "AA:BB:CC:DD:EE:FF", "rssi": -63}], "state": 3, "peer": ""})
         if self.path == "/":
             self.path = "/index.html"
         return super().do_GET()
@@ -110,8 +105,6 @@ class Handler(SimpleHTTPRequestHandler):
         if self.path == "/api/action":
             req = self.body()
             print("  action:", req)
-            if req.get("do") == "bt_select":
-                CONFIG["audio"].update(out="bluetooth", bt_name=req.get("name", ""), bt_mac=req.get("mac", ""))
             return self.send_json({"ok": True})
         return self.send_json({"ok": False, "error": "unknown"}, 404)
 

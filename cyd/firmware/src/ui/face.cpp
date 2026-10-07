@@ -15,7 +15,6 @@
 #include <stdio.h>
 #include <string.h>
 
-#include "audio/audio.h"
 #include "complications.h"
 #include "core/config.h"
 #include "core/platform.h"
@@ -103,12 +102,6 @@ static void comp_tap(uint8_t comp) {
       if (icao) nav_show_flight(icao);
       break;
     }
-    case COMP_AUDIO:
-      if (g_cfg.atc_mount[0])
-        audio_atc_toggle();
-      else
-        nav_goto(PAGE_SETTINGS, true);
-      break;
     case COMP_STATUS: nav_goto(PAGE_SETTINGS, true); break;
     default: break;
   }

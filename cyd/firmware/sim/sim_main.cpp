@@ -342,8 +342,6 @@ int main(int argc, char** argv) {
   snprintf(g_cfg.loc_name, sizeof(g_cfg.loc_name), "San Francisco");
   snprintf(g_cfg.tz_name, sizeof(g_cfg.tz_name), "America/Los_Angeles");
   snprintf(g_cfg.tz_posix, sizeof(g_cfg.tz_posix), "PST8PDT,M3.2.0,M11.1.0");
-  snprintf(g_cfg.atc_mount, sizeof(g_cfg.atc_mount), "ksfo_twr");
-  snprintf(g_cfg.atc_label, sizeof(g_cfg.atc_label), "KSFO Tower");
   snprintf(g_cfg.wifi_ssid, sizeof(g_cfg.wifi_ssid), "HomeWiFi");
   g_cfg.rotation = landscape ? 1 : 0;
   g_cfg.al_quake = true;
@@ -458,12 +456,6 @@ int main(int argc, char** argv) {
   shot("13_setup");
   tap_label("Later");
   run(600);
-
-  bt_sheet_open();
-  run(900);
-  shot("14_bluetooth");
-  sheet_close(lv_obj_get_child(lv_layer_top(), -1));
-  run(800);
 
   /* complication picker: edit mode, then tap the second slot */
   face_editor_open();

@@ -27,5 +27,4 @@ void ui_toast(const char* text);   /* short banner */
 #define UI_CHANGED_UNITS 0x04
 #define UI_CHANGED_RADAR 0x08
 #define UI_CHANGED_LOCATION 0x10
-#define UI_CHANGED_AUDIO 0x20
 #define UI_CHANGED_ALL 0xFF

@@ -41,7 +41,7 @@ OUT_DIR = os.path.join(FW, "src", "assets")
 MODULES = ["tz_posix", "schema", "geo", "settings", "portal"]
 
 # Every source the portal is built from (hashed for --check).
-SOURCES = ["portal.html", "css/app.css", "img/icon.svg", "data/atc_feeds.json"] + [f"js/{m}.js" for m in MODULES]
+SOURCES = ["portal.html", "css/app.css", "img/icon.svg"] + [f"js/{m}.js" for m in MODULES]
 
 IMPORT_RE = re.compile(r"""^import\s*\{([^}]*)\}\s*from\s*'\./([a-z_]+)\.js';?""", re.M)
 EXPORT_RE = re.compile(r"^export\s+(?:async\s+function\s*\*?\s*(\w+)|function\s*\*?\s*(\w+)|class\s+(\w+)|(?:const|let)\s+(\w+))", re.M)
@@ -138,8 +138,6 @@ def main() -> int:
         return check()
     files = [
         ("/index.html", "text/html", build_page()),
-        # fetched by the Audio page only (LiveATC airport list)
-        ("/data/atc_feeds.json", "application/json", read("data/atc_feeds.json", "rb")),
         ("/img/icon.svg", "image/svg+xml", read("img/icon.svg", "rb")),
     ]
     blobs = []

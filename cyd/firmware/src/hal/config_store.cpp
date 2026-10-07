@@ -119,14 +119,6 @@ bool config_store_save(const AppConfig& c) {
   return err == ESP_OK;
 }
 
-bool config_store_peek_bluetooth() {
-  char* json = read_best(nullptr, nullptr, nullptr);
-  if (!json) return false;
-  bool on = strstr(json, "\"out\":\"bluetooth\"") != nullptr;
-  free(json);
-  return on;
-}
-
 void config_store_erase() {
   const esp_partition_t* p = part();
   if (p) esp_partition_erase_range(p, 0, 2 * FSCFG_SLOT_SIZE);

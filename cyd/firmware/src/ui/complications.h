@@ -35,7 +35,6 @@ enum CompCustom : uint8_t {
   CUSTOM_SOLAR,
   CUSTOM_HOURLY,
   CUSTOM_ALT_BANDS,
-  CUSTOM_LEVEL,      /* audio meter */
 };
 
 struct CompData {

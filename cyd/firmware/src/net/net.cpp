@@ -11,7 +11,6 @@
 
 #include "net.h"
 
-#include <ESPmDNS.h>
 #include <WiFi.h>
 #include <esp_heap_caps.h>
 #include <esp_system.h>
@@ -155,8 +154,6 @@ static void on_connected() {
     configTzTime(nc.posix[0] ? nc.posix : "UTC0", "pool.ntp.org", "time.google.com", "time.cloudflare.com");
     s_time_started = true;
   }
-  MDNS.end();
-  if (MDNS.begin(nc.host[0] ? nc.host : "flightscnr")) MDNS.addService("http", "tcp", 80);
   s_refresh |= NET_REFRESH_ALL;
   plat_mem_mark("connected");
 }
@@ -172,10 +169,10 @@ static void mem_report() {
     TaskHandle_t t = xTaskGetHandle(name);
     return t ? (int)uxTaskGetStackHighWaterMark(t) : -1;
   };
-  Serial.printf("[mem] heap %u (lowest %u), largest block %u; spare stack: ui %d, net %d, portal %d, audio %d\n",
+  Serial.printf("[mem] heap %u (lowest %u), largest block %u; spare stack: ui %d, net %d, portal %d\n",
                 (unsigned)heap_caps_get_free_size(MALLOC_CAP_8BIT), (unsigned)plat_min_free_heap(),
                 (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT), spare("loopTask"),
-                (int)uxTaskGetStackHighWaterMark(nullptr), spare("portal"), spare("audio"));
+                (int)uxTaskGetStackHighWaterMark(nullptr), spare("portal"));
 }
 
 static void wifi_service() {
@@ -357,14 +354,33 @@ static bool build_url(uint8_t src, float radius_nm, char* url, size_t n) {
 
 static uint32_t s_peak_day;
 static int16_t s_feed_told[SRC_COUNT]; /* last failure logged per source */
+static uint32_t s_feed_rest_until[SRC_COUNT]; /* after "429 rate limited" */
+
+/* Sources that work without HTTPS (adsb.lol, a local receiver) go first:
+ * an HTTPS request holds ~65 KB for a few seconds, every poll, on a board
+ * with ~80 KB to spare. The configured order holds within each group. */
+static int feed_order(uint8_t* out) {
+  int n = 0;
+  for (int pass = 0; pass < 2; pass++)
+    for (int i = 0; i < CFG_MAX_SOURCES; i++) {
+      uint8_t s = nc.sources[i];
+      if (s == SRC_NONE || s >= SRC_COUNT) continue;
+      bool plain = s == SRC_ADSBLOL || s == SRC_DUMP1090;
+      if (plain == (pass == 0)) out[n++] = s;
+    }
+  return n;
+}
 
 static bool fetch_flights() {
   float radius = nc.range_nm * 1.3f + 3.0f; /* a margin for rim blips */
   char url[160];
   int last_code = 0;
   uint8_t last_src = SRC_NONE;
-  for (int i = 0; i < CFG_MAX_SOURCES; i++) {
-    uint8_t src = nc.sources[i];
+  uint8_t order[CFG_MAX_SOURCES];
+  int norder = feed_order(order);
+  for (int i = 0; i < norder; i++) {
+    uint8_t src = order[i];
+    if ((int32_t)(millis() - s_feed_rest_until[src]) < 0) continue;
     if (!build_url(src, radius, url, sizeof(url))) continue;
     FeedCtx ctx{0, 0, millis(), radius, src == SRC_DUMP1090};
     s_stage_n = 0;
@@ -372,6 +388,7 @@ static bool fetch_flights() {
     last_code = code;
     last_src = src;
     if (code != 200) {
+      if (code == 429) s_feed_rest_until[src] = millis() + 60000; /* the others carry on meanwhile */
       if (src < SRC_COUNT && s_feed_told[src] != code) { /* each new failure once, not every poll */
         s_feed_told[src] = (int16_t)code;
         Serial.printf("[feed] %s: %d %s%s\n", source_name(src), code, http_reason(code),
@@ -559,8 +576,15 @@ static void fetch_weather(bool forecast_due) {
       if (code == 429) s_tomorrow_backoff_until = millis() + 10u * 60u * 1000u; /* Pi: 10 min backoff */
     }
   }
-  if (!ok && (nc.wx_provider == WX_AUTO || nc.wx_provider == WX_OPENMETEO || !nc.key[0])) ok = fetch_openmeteo(w);
-  if (!ok) return;
+  /* Whatever was chosen, fall back to Open-Meteo rather than show nothing:
+   * Tomorrow.io needs HTTPS, which waits for free memory on this board. */
+  if (!ok) ok = fetch_openmeteo(w);
+  if (!ok) {
+    ModelGuard g;
+    Serial.printf("[wx] no weather: %s\n", g_model.wx_err);
+    return;
+  }
+  Serial.printf("[wx] %s: %.1f C\n", w.provider == WX_TOMORROW ? "Tomorrow.io" : "Open-Meteo", w.temp_c);
   ModelGuard g;
   g_model.wx = w;
   g_model.wx.valid = true;
@@ -672,10 +696,11 @@ void net_init() {
     Serial.println("[net] last reset was a brownout: Wi-Fi transmit power lowered to 11 dBm");
   }
   WiFi.setAutoReconnect(true);
-  if (g_cfg.audio_out != AUDIO_BLUETOOTH) WiFi.setSleep(false); /* coexistence needs modem sleep */
+  WiFi.setSleep(false); /* no modem sleep: lower latency for the portal */
   s_disconnected_since = millis();
   sta_begin();
   portal_init();
   plat_mem_mark("portal");
-  xTaskCreatePinnedToCore(net_task, "net", 12288, nullptr, 3, nullptr, 0);
+  /* A TLS handshake peaked at ~6.2 KB of stack in device logs. */
+  xTaskCreatePinnedToCore(net_task, "net", 10240, nullptr, 3, nullptr, 0);
 }

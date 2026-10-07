@@ -35,7 +35,6 @@ enum SpeedUnit : uint8_t { SPD_KMH = 0, SPD_MPH, SPD_KT, SPD_MS };
 enum LabelMode : uint8_t { LABELS_OFF = 0, LABELS_NEAREST, LABELS_ALL };
 enum TagLines : uint8_t { TAG_LINES_1 = 1, TAG_LINES_2 = 2, TAG_LINES_3 = 3 };
 enum PlaneColor : uint8_t { PLANE_COLOR_THEME = 0, PLANE_COLOR_ALTITUDE };
-enum AudioOut : uint8_t { AUDIO_OFF = 0, AUDIO_SPEAKER, AUDIO_BLUETOOTH };
 enum FlightSource : uint8_t {
   SRC_NONE = 0,
   SRC_ADSBFI,         /* opendata.adsb.fi (free, no key) - same as FlightScnr Pi */
@@ -94,18 +93,6 @@ struct AppConfig {
   bool bgr;           /* panel colour order */
   bool spi80;         /* 80 MHz SPI (faster, some panels can't) */
   uint8_t board;      /* BoardId (core/board.h); 0 = detect at start-up */
-
-  /* Audio */
-  uint8_t audio_out;
-  char bt_name[32];
-  uint8_t bt_mac[6];
-  bool bt_has_mac;
-  uint8_t vol_master, vol_chime, vol_alert, vol_atc;
-  bool chime;
-  bool quiet;
-  uint8_t quiet_start, quiet_end; /* hours, local */
-  char atc_mount[40];
-  char atc_label[48];
 
   /* Alerts (Pi: alert_prefs.json) */
   bool al_military, al_emergency, al_tracked, al_watch, al_quake;

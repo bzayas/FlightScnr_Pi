@@ -15,20 +15,19 @@
  * (https://github.com/yashmulgaonkar/FlightScnr_Pi), CC BY-NC-SA 4.0.
  * Non-commercial use only.
  *
- * Core 1: LVGL UI (this loop). Core 0: Wi-Fi, data fetches, portal, audio.
+ * Core 1: LVGL UI (this loop). Core 0: Wi-Fi, data fetches, portal.
  */
 
 #include <Arduino.h>
 #include <Preferences.h>
-#include <esp_bt.h>
 #include <esp_system.h>
 #include <lvgl.h>
 #include <nvs_flash.h>
 
-#include "audio/audio.h"
 #include "core/board.h"
 #include "core/commands.h"
 #include "core/config.h"
+#include "core/mem_guard.h"
 #include "core/platform.h"
 #include "data/model.h"
 #include "hal/config_store.h"
@@ -36,19 +35,9 @@
 #include "net/net.h"
 #include "ui/ui.h"
 
-extern bool g_bt_mem_kept;
-extern bool g_bt_mem_short;
-
-/* Bluetooth audio needs its controller RAM reserved from boot, plus Bluedroid
- * (~40 KB) and Wi-Fi (~50 KB) from the heap once the UI exists. Below this,
- * keeping Bluetooth would crash Wi-Fi start-up, so it's given up for the
- * session instead (the speaker is used, and the UI says why). */
-/* Measured on a 2.8" CYD: Bluedroid's A2DP source takes ~84 KB and Wi-Fi
- * with the portal and network tasks ~72 KB, plus room to run. */
-static const uint32_t BT_MIN_HEAP_AFTER_UI = (84 + 72 + 24) * 1024;
-
-/* LVGL layout + our renderers nest deeper than Arduino's default 8 KB. */
-SET_LOOP_TASK_STACK_SIZE(16 * 1024);
+/* LVGL layout + our renderers nest deeper than Arduino's default 8 KB;
+ * device logs show ~4 KB used at most, so 10 KB leaves a wide margin. */
+SET_LOOP_TASK_STACK_SIZE(10 * 1024);
 
 static const char* reset_reason_name(esp_reset_reason_t r) {
   switch (r) {
@@ -81,8 +70,6 @@ static uint32_t diff_mask(const AppConfig& a, const AppConfig& b) {
       a.plane_color != b.plane_color || a.runways != b.runways)
     m |= UI_CHANGED_RADAR;
   if (a.lat != b.lat || a.lon != b.lon || strcmp(a.tz_posix, b.tz_posix)) m |= UI_CHANGED_LOCATION;
-  if (a.audio_out != b.audio_out || strcmp(a.atc_mount, b.atc_mount) || a.vol_master != b.vol_master)
-    m |= UI_CHANGED_AUDIO;
   return m;
 }
 
@@ -93,16 +80,13 @@ static void apply_patch(const char* json) {
     if (!cfg_apply_json(g_cfg, json, strlen(json), true)) return;
   }
   bool wifi_changed = strcmp(before.wifi_ssid, g_cfg.wifi_ssid) || strcmp(before.wifi_pass, g_cfg.wifi_pass);
-  /* Switching to Bluetooth needs a restart so its RAM is reserved at boot.
-   * Only on the switch itself: any other change must not restart. */
-  bool needs_reboot = before.rotation != g_cfg.rotation || before.spi80 != g_cfg.spi80 || before.board != g_cfg.board ||
-                      (before.audio_out != AUDIO_BLUETOOTH && g_cfg.audio_out == AUDIO_BLUETOOTH && !g_bt_mem_kept);
+  /* The panel driver and orientation are set up once, at start-up. */
+  bool needs_reboot = before.rotation != g_cfg.rotation || before.spi80 != g_cfg.spi80 || before.board != g_cfg.board;
   uint32_t mask = diff_mask(before, g_cfg);
   if (mask & UI_CHANGED_LOCATION) plat_apply_timezone(g_cfg.tz_posix);
   if (before.invert != g_cfg.invert) plat_apply_panel_settings();
   plat_config_changed(true);
   if (wifi_changed) net_set_wifi(g_cfg.wifi_ssid, g_cfg.wifi_pass);
-  if (mask & UI_CHANGED_AUDIO) audio_apply_config();
   if (mask & (UI_CHANGED_LOCATION | UI_CHANGED_RADAR)) net_refresh(NET_REFRESH_ALL);
   ui_config_applied(mask);
   if (needs_reboot) {
@@ -155,12 +139,8 @@ void setup() {
   cfg_defaults(g_cfg);
   uint32_t flags = 0;
   bool loaded = config_store_load(g_cfg, &flags);
-  g_bt_mem_kept = config_store_peek_bluetooth();
-  /* A2DP is Classic Bluetooth only: give the BLE controller's RAM back now. */
-  if (g_bt_mem_kept) esp_bt_controller_mem_release(ESP_BT_MODE_BLE);
-  Serial.printf("[sys] settings %s%s, bluetooth %s, heap %u\n", loaded ? "loaded" : "defaults",
-                (flags & FSCFG_FLAG_INSTALLER) ? " (from installer)" : "", g_bt_mem_kept ? "on" : "off",
-                (unsigned)plat_free_heap());
+  Serial.printf("[sys] settings %s%s, heap %u\n", loaded ? "loaded" : "defaults",
+                (flags & FSCFG_FLAG_INSTALLER) ? " (from installer)" : "", (unsigned)plat_free_heap());
   plat_apply_timezone(g_cfg.tz_posix);
 
   board_select(g_cfg.board);
@@ -168,29 +148,20 @@ void setup() {
     pinMode(pin, OUTPUT);
     digitalWrite(pin, HIGH); /* common anode: off */
   }
-  if (board().audio_en >= 0) {
+  if (board().audio_en >= 0) { /* no audio yet: keep the speaker amplifier off (no hiss) */
     pinMode(board().audio_en, OUTPUT);
-    digitalWrite(board().audio_en, HIGH); /* amplifier off (no hiss at idle) */
+    digitalWrite(board().audio_en, HIGH);
   }
 
-  /* Two ~10 KB bands keep DMA and rendering overlapped; more buys little
-   * speed and the board has no PSRAM. Bluetooth Classic owns ~100 KB of
-   * RAM, so it gets smaller ones. */
-  display_init(g_cfg.rotation, g_bt_mem_kept ? 7680 : 10240);
+  /* Two ~7.5 KB bands (16 lines at 240 px) keep DMA and rendering
+   * overlapped; more buys little speed and the board has no PSRAM. */
+  display_init(g_cfg.rotation, 7680);
   Serial.printf("[boot] display ok, heap %u\n", (unsigned)plat_free_heap());
   ui_init(display_width(), display_height());
   Serial.printf("[boot] ui ok, heap %u\n", (unsigned)plat_free_heap());
-  if (g_bt_mem_kept && plat_free_heap() < BT_MIN_HEAP_AFTER_UI) {
-    esp_bt_controller_mem_release(ESP_BT_MODE_BTDM); /* its RAM joins the heap */
-    g_bt_mem_kept = false;
-    g_bt_mem_short = true;
-    Serial.printf("[boot] not enough memory for Bluetooth audio and Wi-Fi together: Bluetooth off, heap now %u\n",
-                  (unsigned)plat_free_heap());
-    ui_toast("Bluetooth audio is off: not enough memory");
-  }
-  audio_init();
-  Serial.printf("[boot] audio ok, heap %u\n", (unsigned)plat_free_heap());
   net_init();
+  /* Last, so it isn't carved out of the start-up stages' memory. */
+  mem_guard_init(10 * 1024);
   Serial.printf("[sys] ready, heap %u (min %u)\n", (unsigned)plat_free_heap(), (unsigned)plat_min_free_heap());
 }
 

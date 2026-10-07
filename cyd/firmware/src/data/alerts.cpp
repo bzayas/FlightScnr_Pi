@@ -14,7 +14,6 @@
 #include <stdio.h>
 #include <string.h>
 
-#include "audio/audio.h"
 #include "core/config.h"
 #include "core/platform.h"
 #include "geo.h"
@@ -43,12 +42,10 @@ struct SeenSet {
 
 static SeenSet s_mil, s_emerg, s_watch;
 static bool s_tracked_in_range;
-static uint32_t s_last_sound_ms;
 static uint32_t s_last_quake_hash;
 static const uint32_t HOLD_MS = 30u * 60u * 1000u;
-static const uint32_t SOUND_COOLDOWN_MS = 3000; /* Pi: _MIL_COOLDOWN_S */
 
-static void notice(uint8_t kind, uint32_t icao, const char* title, const char* body, SoundId snd) {
+static void notice(uint8_t kind, uint32_t icao, const char* title, const char* body) {
   Notice n;
   memset(&n, 0, sizeof(n));
   n.kind = kind;
@@ -56,11 +53,6 @@ static void notice(uint8_t kind, uint32_t icao, const char* title, const char* b
   snprintf(n.title, sizeof(n.title), "%s", title);
   snprintf(n.body, sizeof(n.body), "%s", body);
   model_push_notice(n);
-  uint32_t now = plat_millis();
-  if (now - s_last_sound_ms >= SOUND_COOLDOWN_MS) {
-    s_last_sound_ms = now;
-    audio_play(snd, CH_ALERT);
-  }
 }
 
 static void describe(const Flight& f, float dist_nm, char* out, size_t n) {
@@ -86,19 +78,19 @@ void alerts_on_flights(const Flight* flights, int n, double home_lat, double hom
       char t[32];
       snprintf(t, sizeof(t), "Squawk %s", f.squawk);
       describe(f, d, body, sizeof(body));
-      notice(NOTICE_EMERGENCY, f.icao, t, body, SND_TRAFFIC);
+      notice(NOTICE_EMERGENCY, f.icao, t, body);
     } else if ((f.flags & FF_MILITARY) && g_cfg.al_military && !s_mil.seen(f.icao, now, HOLD_MS)) {
       s_mil.add(f.icao, now);
       describe(f, d, body, sizeof(body));
-      notice(NOTICE_MILITARY, f.icao, "Military aircraft", body, SND_MILITARY);
+      notice(NOTICE_MILITARY, f.icao, "Military aircraft", body);
     } else if ((f.flags & FF_WATCH) && g_cfg.al_watch && !s_watch.seen(f.icao, now, HOLD_MS)) {
       s_watch.add(f.icao, now);
       describe(f, d, body, sizeof(body));
-      notice(NOTICE_WATCH, f.icao, "Watch list", body, SND_TRAFFIC);
+      notice(NOTICE_WATCH, f.icao, "Watch list", body);
     }
     if ((f.flags & FF_TRACKED) && !s_tracked_in_range && g_cfg.al_tracked) {
       describe(f, d, body, sizeof(body));
-      notice(NOTICE_TRACKED, f.icao, "Tracked flight in range", body, SND_TRAFFIC);
+      notice(NOTICE_TRACKED, f.icao, "Tracked flight in range", body);
     }
   }
   s_tracked_in_range = tracked_now;
@@ -113,18 +105,6 @@ void alerts_on_quake(const QuakeData& q) {
   char title[32], body[64];
   snprintf(title, sizeof(title), "M%.1f earthquake", q.mag);
   snprintf(body, sizeof(body), "%s", q.place);
-  notice(NOTICE_QUAKE, 0, title, body, SND_QUAKE);
+  notice(NOTICE_QUAKE, 0, title, body);
 }
 
-void alerts_tick(time_t now) {
-  static int last_hour = -1;
-  if (!now) return;
-  struct tm t;
-  plat_localtime(now, &t);
-  if (t.tm_min == 0 && t.tm_hour != last_hour) {
-    if (last_hour != -1 && g_cfg.chime) audio_play(SND_CHIME, CH_CHIME);
-    last_hour = t.tm_hour;
-  } else if (last_hour == -1) {
-    last_hour = t.tm_min == 0 ? t.tm_hour : -2; /* never chime right at boot */
-  }
-}

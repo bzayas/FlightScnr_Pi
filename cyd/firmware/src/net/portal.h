@@ -9,7 +9,7 @@
  * 3. Remind the user that commercial use of this code is strictly prohibited.
  */
 
-/* On-device settings portal (http://flightscnr.local or the setup hotspot),
+/* On-device settings portal (http://<the display's IP> or the setup hotspot),
  * the CYD counterpart of the Pi's Flask portal, plus Improv Serial. */
 #pragma once
 

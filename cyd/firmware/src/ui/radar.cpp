@@ -46,6 +46,7 @@ static const int RANGE_COUNT = sizeof(RANGES_NM) / sizeof(RANGES_NM[0]);
 #define MAX_TRACKS MAX_FLIGHTS
 #define MAX_RWY 160
 #define MAX_APT_LABELS 14
+#define MAX_APT_CAND 32
 #define TAG_LINE_H 11
 
 struct Track {
@@ -236,6 +237,13 @@ __attribute__((noinline)) static void rebuild_runways() {
       b = m;
   }
   float k = px_per_nm();
+  struct Cand {
+    float x, y;
+    uint8_t kft;
+    int idx;
+  };
+  static Cand cand[MAX_APT_CAND];
+  int ncand = 0;
   for (int i = a; i < AIRPORTS_COUNT && AIRPORTS[i].lat_e5 <= hi; i++) {
     const AirportRec& ap = AIRPORTS[i];
     double alat = ap.lat_e5 / 1e5, alon = ap.lon_e5 / 1e5;
@@ -247,18 +255,40 @@ __attribute__((noinline)) static void rebuild_runways() {
       geo_project(g_cfg.lat, g_cfg.lon, alat + rw.dlat2 / 1e5, alon + rw.dlon2 / 1e5, &e1, &n1);
       s_rwy[s_nrwy++] = {e0 * k, -n0 * k, e1 * k, -n1 * k};
     }
-    if (ap.longest_kft >= 6 && s_napt < MAX_APT_LABELS) {
+    if (ap.longest_kft >= 6 && ncand < MAX_APT_CAND) {
       float e, n;
       geo_project(g_cfg.lat, g_cfg.lon, alat, alon, &e, &n);
-      AirportLabel& l = s_apt[s_napt];
-      l.x = e * k;
-      l.y = -n * k;
-      if (l.x * l.x + l.y * l.y < (s_r - 14) * (s_r - 14)) {
-        memcpy(l.id, ap.ident, 4);
-        l.id[4] = 0;
-        s_napt++;
-      }
+      float x = e * k, y = -n * k;
+      if (x * x + y * y < (s_r - 14) * (s_r - 14)) cand[ncand++] = {x, y, ap.longest_kft, i};
     }
+  }
+  /* Label the biggest airports first, and only where a label doesn't run
+   * into another one or the centre marker: on a 2.8" radar a busy area
+   * otherwise turns into a pile of ICAO codes. */
+  for (int i = 1; i < ncand; i++) {
+    Cand c = cand[i];
+    int j = i - 1;
+    while (j >= 0 && cand[j].kft < c.kft) {
+      cand[j + 1] = cand[j];
+      j--;
+    }
+    cand[j + 1] = c;
+  }
+  const int max_labels = ui_compact() ? 5 : 10;
+  lv_area_t placed[MAX_APT_LABELS];
+  for (int i = 0; i < ncand && s_napt < max_labels && s_napt < MAX_APT_LABELS; i++) {
+    lv_area_t box = {(lv_coord_t)(cand[i].x + 4), (lv_coord_t)(cand[i].y - 5), (lv_coord_t)(cand[i].x + 38),
+                     (lv_coord_t)(cand[i].y + 12)};
+    if (box.x1 < 12 && box.x2 > -12 && box.y1 < 12 && box.y2 > -12) continue; /* the home marker */
+    bool clash = false;
+    for (int j = 0; j < s_napt && !clash; j++) clash = _lv_area_is_on(&box, &placed[j]);
+    if (clash) continue;
+    placed[s_napt] = box;
+    AirportLabel& l = s_apt[s_napt++];
+    l.x = cand[i].x;
+    l.y = cand[i].y;
+    memcpy(l.id, AIRPORTS[cand[i].idx].ident, 4);
+    l.id[4] = 0;
   }
 }
 

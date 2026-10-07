@@ -62,30 +62,34 @@ static void caption(lv_draw_ctx_t* dc, const lv_area_t& a, const char* s) {
   t(dc, s, &fs_text_12, pal().text2, a.x1 + 14, a.y1 + 8, LV_TEXT_ALIGN_LEFT);
 }
 
+/* 320x240: a shorter hero, so the forecast starts on the first screen. */
+static bool hero_short() { return lv_disp_get_ver_res(nullptr) < 260; }
+
 static void draw_hero(lv_draw_ctx_t* dc, Fx& f, const lv_area_t& a, const WeatherData& w) {
   const Palette& p = pal();
+  const bool sh = hero_short();
   int x = a.x1 + 14;
   const char* where = g_cfg.loc_name[0] ? g_cfg.loc_name : "My Location";
-  t(dc, where, &fs_text_16, p.text2, x, a.y1 + 10, LV_TEXT_ALIGN_LEFT);
+  t(dc, where, sh ? &fs_text_14 : &fs_text_16, p.text2, x, a.y1 + (sh ? 8 : 10), LV_TEXT_ALIGN_LEFT);
   char buf[40];
   if (!w.valid) {
     t(dc, g_cfg.wx_provider == WX_OFF ? "Weather is turned off" : "Waiting for weather\xE2\x80\xA6", &fs_text_20, p.text, x,
-      a.y1 + 50, LV_TEXT_ALIGN_LEFT);
+      a.y1 + (sh ? 40 : 50), LV_TEXT_ALIGN_LEFT);
     return;
   }
   fmt_temp(w.temp_c, buf, sizeof(buf));
-  t(dc, buf, &fs_num_72, p.text, x - 4, a.y1 + 32, LV_TEXT_ALIGN_LEFT);
-  t(dc, wx_name(w.cond), &fs_text_20, p.text, x, a.y1 + 104, LV_TEXT_ALIGN_LEFT);
+  t(dc, buf, sh ? &fs_num_56 : &fs_num_72, p.text, x - 4, a.y1 + (sh ? 24 : 32), LV_TEXT_ALIGN_LEFT);
+  t(dc, wx_name(w.cond), sh ? &fs_text_16 : &fs_text_20, p.text, x, a.y1 + (sh ? 78 : 104), LV_TEXT_ALIGN_LEFT);
   char hi[12], lo[12], fl[12];
   fmt_temp(w.hi_c, hi, sizeof(hi));
   fmt_temp(w.lo_c, lo, sizeof(lo));
   fmt_temp(w.feels_c, fl, sizeof(fl));
   snprintf(buf, sizeof(buf), "H:%s  L:%s  Feels %s", hi, lo, fl);
-  t(dc, buf, &fs_text_14, p.text2, x, a.y1 + 130, LV_TEXT_ALIGN_LEFT);
+  t(dc, buf, sh ? &fs_text_12 : &fs_text_14, p.text2, x, a.y1 + (sh ? 98 : 130), LV_TEXT_ALIGN_LEFT);
   bool night = cfg_has_location(g_cfg) && plat_now() &&
                sun_elevation(g_cfg.lat, g_cfg.lon, plat_now()) < SUN_HORIZON_DEG;
-  float gs = 92;
-  glyph_weather(f, w.cond, night, a.x2 - 14 - gs / 2, a.y1 + 70, gs, p.platter);
+  float gs = sh ? 70 : 92;
+  glyph_weather(f, w.cond, night, a.x2 - 14 - gs / 2, a.y1 + (sh ? 58 : 70), gs, p.platter);
 }
 
 static void draw_daily(lv_draw_ctx_t* dc, Fx& f, const lv_area_t& a, const WeatherData& w) {
@@ -169,7 +173,7 @@ static void draw_moon(lv_draw_ctx_t* dc, Fx& f, const lv_area_t& a) {
     time_t full = moon_next_full(now);
     struct tm tmv;
     plat_localtime(full, &tmv);
-    strftime(buf, sizeof(buf), "Next full moon %a, %b %-d", &tmv);
+    fmt_strftime(buf, sizeof(buf), "Next full moon %a, %b %-d", &tmv);
     t(dc, buf, &fs_text_14, p.text2, a.x1 + 96, a.y1 + 76, LV_TEXT_ALIGN_LEFT);
   }
 }
@@ -259,7 +263,7 @@ static lv_obj_t* make_card(int id, int h) {
 lv_obj_t* sky_create(lv_obj_t* parent) {
   s_page = w_page(parent, nullptr);
   lv_obj_set_style_pad_row(s_page, 10, 0);
-  s_cards[CARD_HERO] = make_card(CARD_HERO, 158);
+  s_cards[CARD_HERO] = make_card(CARD_HERO, hero_short() ? 120 : 158);
   s_cards[CARD_HOURLY] = make_card(CARD_HOURLY, 104);
   s_cards[CARD_DAILY] = make_card(CARD_DAILY, 30 + 4 * 34 + 4);
   s_cards[CARD_SUN] = make_card(CARD_SUN, 152);

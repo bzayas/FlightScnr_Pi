@@ -13,7 +13,6 @@
 import { diff, normalize } from './schema.js';
 import { SECTIONS, SettingsUI, h, tile, toast } from './settings.js';
 
-const BT_STATES = ['Off', 'Restart needed', 'Ready', 'Searching', 'Connecting', 'Connected', 'Playing', 'Failed'];
 
 window.__fsStarted = true; // the page's code arrived (see the watchdog in portal.html)
 
@@ -49,15 +48,8 @@ const api = {
   save: (patch) => post('/api/config', patch),
   status: () => j('/api/status'),
   scanWifi: async () => (await j('/api/scan')).networks || [],
-  btScan: () => post('/api/action', { do: 'bt_scan' }),
-  btResults: async () => (await j('/api/bt')).devices || [],
   action: async (name, extra = {}) => {
-    const r = await post('/api/action', { do: name, ...extra });
-    // The firmware saves pairing itself; keep the baseline in step so it
-    // doesn't show up as an unsaved change.
-    if (baseline && name === 'bt_select') Object.assign(baseline.audio, { out: 'bluetooth', bt_name: extra.name, bt_mac: extra.mac });
-    if (baseline && name === 'bt_forget') Object.assign(baseline.audio, { bt_name: '', bt_mac: '' });
-    return r;
+    return post('/api/action', { do: name, ...extra });
   },
   saved: () => baseline,
 };
@@ -87,13 +79,12 @@ class PortalUI extends SettingsUI {
         ]),
         this.group('Network', [
           this.row('Wi-Fi', s.wifi.connected ? `${s.wifi.ip} · ${s.wifi.rssi} dBm` : s.wifi.ap ? `Hotspot “${s.wifi.ap_ssid}” is open for setup` : 'Not connected', h('span', { class: 'value' }, s.wifi.connected ? s.wifi.ssid : '—')),
-          this.row('Address', null, h('span', { class: 'value' }, `http://${s.wifi.host || 'flightscnr'}.local`)),
+          this.row('Address', null, h('span', { class: 'value' }, s.wifi.ip ? `http://${s.wifi.ip}` : '—')),
           this.row('Clock', s.time.synced ? (this.cfg.loc.tz || s.time.tz).replace(/_/g, ' ') : 'Waiting for network time', h('span', { class: 'value' }, t && s.time.synced ? t.toLocaleString() : '—')),
         ]),
         this.group('Data', [
           this.row('Flights', s.feed.ok ? `${s.feed.source} · updated ${ago(s.feed.age_s)}` : s.feed.error || 'Waiting…', h('span', { class: 'value' }, `${s.feed.aircraft} aircraft`)),
           this.row('Weather', s.weather.ok ? s.weather.provider : s.weather.error || 'Waiting…', h('span', { class: 'value' }, s.weather.ok && s.weather.temp_c !== undefined ? (this.cfg.units.temp === 'F' ? `${Math.round((s.weather.temp_c * 9) / 5 + 32)} °F` : `${Math.round(s.weather.temp_c)} °C`) : '—')),
-          this.row('Audio', s.audio.error || (s.audio.atc ? 'LiveATC playing' : ''), h('span', { class: 'value' }, s.audio.out === 2 ? `Bluetooth · ${BT_STATES[s.audio.bt_state] || ''}${s.audio.bt_peer ? ` · ${s.audio.bt_peer}` : ''}` : s.audio.out === 1 ? 'Speaker' : 'Off')),
         ]),
       );
     };
@@ -168,8 +159,7 @@ async function save() {
   if (!Object.keys(patch).length) return;
   const reboot =
     (patch.face && 'rotation' in patch.face) ||
-    (patch.display && ('spi80' in patch.display || 'board' in patch.display)) ||
-    (patch.audio && patch.audio.out === 'bluetooth' && baseline.audio.out !== 'bluetooth');
+    (patch.display && ('spi80' in patch.display || 'board' in patch.display));
   const btnSave = bar.querySelector('.primary');
   btnSave.disabled = true;
   try {

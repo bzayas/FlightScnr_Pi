@@ -54,7 +54,6 @@ def main() -> int:
     assets = {}
     for rel in sorted(os.listdir(os.path.join(ROOT, "img"))):
         assets[f"img/{rel}"] = data_url(MIME[os.path.splitext(rel)[1]], read(f"img/{rel}", "rb"))
-    assets["data/atc_feeds.json"] = data_url(MIME[".json"], read("data/atc_feeds.json", "rb"))
     assets["firmware/manifest.json"] = data_url(MIME[".json"], read("firmware/manifest.json", "rb"))
     for part in manifest["builds"][0]["parts"]:
         assets[f"firmware/{part['path']}"] = data_url(MIME[".bin"], read(f"firmware/{part['path']}", "rb"))

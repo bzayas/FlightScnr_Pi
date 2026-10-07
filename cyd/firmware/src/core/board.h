@@ -56,7 +56,7 @@ struct BoardDef {
   bool invert;       /* panel needs colour inversion by default */
   int8_t bl;         /* backlight, high = on */
   int8_t led_r, led_g, led_b; /* common anode: LOW = on */
-  int8_t audio_en;   /* amplifier enable, LOW = on; -1 = none */
+  int8_t audio_en;   /* speaker amplifier enable, LOW = on (held off); -1 = none */
   bool touch_shared; /* XPT2046 on the LCD bus; otherwise on t_* */
   int8_t t_sck, t_mosi, t_miso;
 };

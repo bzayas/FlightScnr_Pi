@@ -36,7 +36,6 @@ enum CompId : uint8_t {
   COMP_FASTEST,
   COMP_TRACKED,
   COMP_QUAKE,
-  COMP_AUDIO,
   COMP_STATUS,
   COMP_COUNT
 };

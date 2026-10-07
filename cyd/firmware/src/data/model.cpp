@@ -78,6 +78,8 @@ uint8_t model_route(const char* callsign, RouteInfo* out) {
   return ROUTE_PENDING;
 }
 
+volatile uint32_t g_https_wait_ms;
+
 bool model_next_route_request(char* out) {
   ModelGuard g;
   if (!s_route_req_n) return false;

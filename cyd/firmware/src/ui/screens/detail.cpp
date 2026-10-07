@@ -170,8 +170,11 @@ static void body_draw(lv_event_t* e) {
       fx_ring(f, bx1, by, 3.0f, 1.0f, p.text3, 255);
       fx_mask(f, PLANE_GLYPH_56, 56, bx0 + (bx1 - bx0) * prog, by, 90, 0.36f, p.blue, 255);
     } else {
+      bool waiting = rs == ROUTE_PENDING && g_https_wait_ms && plat_millis() - g_https_wait_ms < 6000;
       t(dc, rs == ROUTE_PENDING ? "Looking up route\xE2\x80\xA6" : "Route not available", &fs_text_16, p.text2,
-        x + w / 2, y + mm.route_h / 2 - 10, LV_TEXT_ALIGN_CENTER);
+        x + w / 2, y + mm.route_h / 2 - (waiting ? 18 : 10), LV_TEXT_ALIGN_CENTER);
+      if (waiting) /* HTTPS waits for free memory (see net/http.cpp) */
+        t(dc, "Waiting for free memory", &fs_text_12, p.text3, x + w / 2, y + mm.route_h / 2 + 2, LV_TEXT_ALIGN_CENTER);
     }
     y += mm.route_h + mm.route_gap;
   }

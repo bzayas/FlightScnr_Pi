@@ -32,12 +32,12 @@ A native port of [FlightScnr Pi](https://github.com/yashmulgaonkar/FlightScnr_Pi
 ## Features
 
 - **The radar is the face.** It has the Pi's dashed range rings, cardinal points, sweep and 3-line tags (callsign, type, altitude), plus runways from OurAirports. Aircraft glide smoothly between updates (dead reckoning), fade in and out, ping when first seen, and helicopters get spinning rotors. Labels never cover another aircraft.
-- **Complication library.** There are 21 complications, ClockKit-style, in five families (large, rectangular, circular, corner, inline):
+- **Complication library.** There are 20 complications, ClockKit-style, in five families (large, rectangular, circular, corner, inline):
   - Time and date: time, date.
   - Weather: weather glyph and temperature, temperature range, forecast, wind, humidity, UV index.
   - Sky: sunrise and sunset solar curve, sunrise, sunset, daylight, moon phase, earthquakes.
   - Flights: aircraft count, nearest, highest, fastest, tracked flight.
-  - Audio and system: LiveATC, status.
+  - System: status.
 
   Long-press the face to edit it, or design it in the installer.
 - **Three layouts, two orientations.** Infograph, Modular and Radar Focus, each designed separately for portrait and landscape.
@@ -50,13 +50,13 @@ A native port of [FlightScnr Pi](https://github.com/yashmulgaonkar/FlightScnr_Pi
 
   Tap a plane for a flight sheet with route progress, and Track or Watch buttons.
 - **Alerts.** Banners and sounds for emergency squawks, military aircraft, your watch list, your tracked flight, and nearby earthquakes. Quiet hours are supported.
-- **Audio.** Hourly chime, alert sounds and **LiveATC** tower audio. It plays through the onboard speaker or a **Bluetooth speaker or headphones** (A2DP).
+- **No sound yet.** Alerts are visual for now. Audio (chimes, alert sounds, LiveATC) will come back once the rest is polished; the boards' memory is the hard part.
 - **Free data, no account needed.**
   - Flights: adsb.fi, airplanes.live, adsb.lol, or your own dump1090/readsb receiver.
   - Routes: adsbdb.
   - Weather: Open-Meteo, or Tomorrow.io with a free key.
   - Earthquakes: USGS.
-- **Setup without a computer, too.** If the board can't join Wi-Fi it opens a `FlightScnr-XXXX` hotspot and shows a QR code. The same settings pages as the installer are served by the device at `http://flightscnr.local`.
+- **Setup without a computer, too.** If the board can't join Wi-Fi it opens a `FlightScnr-XXXX` hotspot and shows a QR code. The same settings pages as the installer are served by the device at its IP address (shown on the display under **Settings → Portal**).
 
 ## Hardware
 
@@ -67,10 +67,10 @@ A native port of [FlightScnr Pi](https://github.com/yashmulgaonkar/FlightScnr_Pi
 | LCD SPI | SCK 14, MOSI 13, MISO 12, CS 15, DC 2 | same |
 | Backlight | GPIO 21 | GPIO 27 |
 | Touch | XPT2046 on its own pins: SCK 25, MOSI 32, MISO 39, CS 33, IRQ 36 | XPT2046 on the LCD bus, CS 33, IRQ 36 |
-| Audio | DAC GPIO 26 → amplifier → speaker connector | same, amplifier enable GPIO 4 (active low) |
+| Speaker | DAC GPIO 26 → amplifier (not used yet) | same, amplifier enable GPIO 4 held off |
 | RGB LED | 4 / 16 / 17 | 22 / 16 / 17 |
 
-FlightScnr asks the screen for its ID at start-up to tell the boards apart (the ST7796 and ST7789 answer; otherwise it's the ILI9341 CYD). If your screen stays dark, set the board by hand in the installer under **Display → Board**. The 3.5″ boards aren't supported yet. Optional extras: a small 8 Ω speaker on the speaker connector, or any Bluetooth speaker.
+FlightScnr asks the screen for its ID at start-up to tell the boards apart (the ST7796 and ST7789 answer; otherwise it's the ILI9341 CYD). If your screen stays dark, set the board by hand in the installer under **Display → Board**. The 3.5″ boards aren't supported yet.
 
 ## Install
 
@@ -82,7 +82,7 @@ Open the FlightScnr CYD web installer in **Chrome or Edge on a computer**. It is
    - **Wi-Fi:** 2.4 GHz only.
    - **Location:** search for a place, or press *Use my current location*. The time zone fills in automatically.
    - **Weather:** works with no key (Open-Meteo). For Tomorrow.io, the page walks you through getting a free key and lets you test it.
-   - **Flights, Watch Face, Sound, Alerts, Units and Display:** all have sensible defaults, matching FlightScnr Pi's.
+   - **Flights, Watch Face, Alerts, Units and Display:** all have sensible defaults, matching FlightScnr Pi's.
 2. **Install.** Plug in the board, press *Connect*, then *Install*. The firmware and a settings blob are written together, so the display boots already on your Wi-Fi, at your location, with your face.
 3. **First boot.** Read and accept the safety notice. If touches land in the wrong place, touch calibration runs by itself.
 
@@ -162,24 +162,13 @@ esptool.py --chip esp32 write_flash 0x0 out/flightscnr-cyd-*.bin
 | Tap a complication | Jumps to its page (weather → Sky, aircraft → Traffic, …) |
 | Long-press the face | Edit mode: swap layouts, tap a slot to pick a complication, choose an accent |
 
-## Bluetooth audio
-
-Choose **Sound → Play sound through → Bluetooth** in the installer, the portal or on the device. Then pair from **Settings → Sound → Bluetooth** on the display, or from the portal. FlightScnr reconnects to that speaker automatically, and falls back to the onboard speaker whenever it isn't connected.
-
-**Not available on the supported boards yet.** Bluetooth audio needs about 180 KB of free memory alongside Wi-Fi and the display, and these boards have no PSRAM: about 110 KB is left once the display is up. FlightScnr checks at start-up, gives the Bluetooth memory back, and plays through the built-in speaker instead, and the display and the portal say why. The code stays for boards with PSRAM.
-
-Limitations:
-- Turning Bluetooth on restarts the board once, so the Bluetooth radio's memory is only reserved while it's in use.
-- Classic Bluetooth A2DP only (SBC, 44.1 kHz stereo). Speakers that need a PIN other than 0000 won't pair.
-- Wi-Fi and Bluetooth share one radio, so streaming LiveATC over Bluetooth on a weak Wi-Fi signal can stutter.
-- LiveATC streams are for personal listening only, per LiveATC.net's terms.
-
 ## Memory
 
 The ESP32 has no PSRAM: Wi-Fi, the screen and everything else share about 190 KB. To stay within that:
 
-- HTTPS needs about 60 KB free. When that isn't available, HTTPS-only sources are skipped: adsb.fi, airplanes.live and Tomorrow.io. Flights then come from adsb.lol, and weather from Open-Meteo, both over plain HTTP. Your Tomorrow.io key is never sent over plain HTTP.
-- Sounds borrow about 50 KB while they play, and give it back afterwards. A sound that wouldn't fit is skipped, and the portal's status page says so. It is never allowed to crash the display.
+- An HTTPS request needs about 65 KB at once, so it only starts when that is free and no page is being built. Routes and aircraft details (adsbdb), Tomorrow.io, adsb.fi, airplanes.live and USGS are HTTPS-only; they wait for a moment with enough memory. Flights fall back to adsb.lol and weather to Open-Meteo, both over plain HTTP. Your Tomorrow.io key is never sent over plain HTTP.
+- The Traffic and Settings pages are built when you swipe towards them and released when you leave. If memory is short at that moment, the page waits a moment instead of failing.
+- A small emergency reserve backs the screen code: if an allocation fails, the reserve is released so the screen keeps working, and it's rebuilt when memory recovers.
 - The device logs its free memory (`[mem]` lines) at start-up, then every minute for the first five minutes, then every ten.
 
 ## Performance and polish
@@ -230,7 +219,6 @@ Third-party components keep their own licenses:
 - LVGL (MIT)
 - LovyanGFX (FreeBSD)
 - ArduinoJson (MIT)
-- minimp3 (CC0)
 - Inter (SIL OFL 1.1)
 - FontAwesome Free (SIL OFL 1.1 / CC BY 4.0)
 - Mozilla CA bundle (MPL 2.0)
@@ -242,5 +230,4 @@ Data:
 - Weather: Tomorrow.io or Open-Meteo.com (CC BY 4.0).
 - Earthquakes: USGS.
 - Airports and runways: OurAirports (public domain).
-- Tower audio: LiveATC.net.
 - Board details: LCDWiki.

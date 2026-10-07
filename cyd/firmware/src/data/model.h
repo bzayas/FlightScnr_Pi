@@ -19,7 +19,9 @@
 #include <stdint.h>
 #include <time.h>
 
-#define MAX_FLIGHTS 100
+/* Nearest first. More than this is unreadable on a 2.8" radar, and each one
+ * costs ~230 bytes of RAM (model + feed staging + radar track). */
+#define MAX_FLIGHTS 64
 #define ALT_UNKNOWN INT32_MIN
 
 enum FlightFlags : uint8_t {
@@ -205,6 +207,9 @@ struct ModelGuard {
 uint8_t model_route(const char* callsign, RouteInfo* out);   /* queues a fetch */
 uint8_t model_aircraft(uint32_t icao, AircraftInfo* out);    /* queues a fetch */
 bool model_next_route_request(char* callsign_out);           /* net task */
+/* plat_millis() of the last HTTPS request skipped for lack of memory (it
+ * runs once enough is free), so the UI can say what a lookup waits for. */
+extern volatile uint32_t g_https_wait_ms;
 bool model_next_aircraft_request(uint32_t* icao_out);        /* net task */
 void model_store_route(const RouteInfo& r);
 void model_store_aircraft(const AircraftInfo& a);
