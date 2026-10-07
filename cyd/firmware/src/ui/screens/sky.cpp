@@ -38,8 +38,8 @@ static uint32_t s_wx_gen, s_minute, s_theme;
 
 static void t(lv_draw_ctx_t* dc, const char* s, const lv_font_t* f, lv_color_t c, int x, int y, lv_text_align_t al) {
   if (!s || !*s) return;
-  lv_point_t sz;
-  lv_txt_get_size(&sz, s, f, 0, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
+  if (y > dc->clip_area->y2 || y + lv_font_get_line_height(f) < dc->clip_area->y1) return; /* not in this band */
+  lv_point_t sz = ui_text_size(s, f);
   int x1 = al == LV_TEXT_ALIGN_CENTER ? x - sz.x / 2 : (al == LV_TEXT_ALIGN_RIGHT ? x - sz.x : x);
   lv_area_t a = {(lv_coord_t)x1, (lv_coord_t)y, (lv_coord_t)(x1 + sz.x), (lv_coord_t)(y + sz.y)};
   if (!_lv_area_is_on(&a, dc->clip_area)) return;
@@ -371,7 +371,7 @@ void sky_tick() {
     lv_coord_t ls = lv_obj_get_style_text_letter_space(s_attrib, 0), w = lv_obj_get_content_width(s_page);
     for (const char* f : forms) {
       lv_point_t sz;
-      lv_txt_get_size(&sz, f, &fs_text_12, ls, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
+      sz = ui_text_size(f, &fs_text_12, ls);
       credit = f;
       if (sz.x <= w) break;
     }

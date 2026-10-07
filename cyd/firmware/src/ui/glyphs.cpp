@@ -174,6 +174,7 @@ void glyph_moon(Fx& f, float phase, float cx, float cy, float r, uint8_t opa) {
   float k = cosf(ph * 2.0f * (float)M_PI); /* terminator position factor */
   int32_t x0 = (int32_t)floorf(cx - r - 1), x1 = (int32_t)ceilf(cx + r + 1);
   int32_t y0 = (int32_t)floorf(cy - r - 1), y1 = (int32_t)ceilf(cy + r + 1);
+  if (f.meas) return fx_measure(f, cx - r, cy - r, cx + r, cy + r);
   if (!fx_intersects(f, (float)x0, (float)y0, (float)x1, (float)y1)) return;
   for (int32_t y = y0; y <= y1; y++) {
     float ny = (y - cy) / r;

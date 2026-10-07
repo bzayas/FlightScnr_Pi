@@ -30,9 +30,14 @@ struct Fx {
   int32_t bx, by, stride;      /* buffer origin + width */
   int32_t cx0, cy0, cx1, cy1;  /* clip, inclusive */
   uint16_t opa;                /* global multiplier 0..256 */
+  lv_area_t* meas;             /* measuring: shapes extend this box instead of drawing */
 };
 
 bool fx_begin(lv_draw_ctx_t* dc, Fx& fx, uint8_t global_opa = 255);
+/* An Fx that draws nothing and grows *box to cover every shape it's given
+ * (box starts empty: x1 > x2). For outlining what a widget draws. */
+void fx_begin_measure(Fx& fx, lv_area_t* box);
+void fx_measure(const Fx& f, float x0, float y0, float x1, float y1); /* shapes drawn pixel by pixel */
 bool fx_intersects(const Fx& f, float x0, float y0, float x1, float y1);
 
 static inline void fx_px(Fx& f, int32_t x, int32_t y, lv_color_t c, uint32_t opa) {
@@ -57,6 +62,10 @@ void fx_glow(Fx& f, float cx, float cy, float r, lv_color_t c, uint8_t opa);
 void fx_mask(Fx& f, const uint8_t* mask, int side, float cx, float cy, float angle, float scale, lv_color_t c,
              uint8_t opa);
 void fx_polygon(Fx& f, const float* xy, int n, lv_color_t c, uint8_t opa); /* convex or simple, AA edges */
+/* Outline of a rounded rectangle, centred on the edges of (x0,y0)-(x1,y1);
+ * the same anti-aliased stroke as fx_ring, so boxes and circles match. */
+void fx_rrect_stroke(Fx& f, float x0, float y0, float x1, float y1, float radius, float half_w, lv_color_t c,
+                     uint8_t opa);
 
 /* Bearing helpers (compass degrees). */
 static inline void fx_polar(float cx, float cy, float r, float deg, float* x, float* y) {

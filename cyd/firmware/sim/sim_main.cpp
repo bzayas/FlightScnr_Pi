@@ -26,6 +26,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
+#include <time.h>
 
 #include "core/commands.h"
 #include "core/config.h"
@@ -124,12 +125,33 @@ static void pump_commands() {
   }
 }
 
+/* CPU time spent in LVGL (timers, layout, rendering) - the UI core's work */
+static double s_cpu_ms;
+static double cpu_now_ms() {
+  struct timespec ts;
+  clock_gettime(CLOCK_THREAD_CPUTIME_ID, &ts);
+  return ts.tv_sec * 1e3 + ts.tv_nsec / 1e6;
+}
+
 static void run(uint32_t ms) {
   for (uint32_t t = 0; t < ms; t += 16) {
     g_sim_ms += 16;
+    double t0 = cpu_now_ms();
     lv_timer_handler();
+    s_cpu_ms += cpu_now_ms() - t0;
     pump_commands();
+    t0 = cpu_now_ms();
     ui_tick();
+    s_cpu_ms += cpu_now_ms() - t0;
+  }
+}
+
+static void refresh_all(int n) {
+  for (int i = 0; i < n; i++) {
+    lv_obj_invalidate(lv_scr_act());
+    double t0 = cpu_now_ms();
+    lv_refr_now(nullptr);
+    s_cpu_ms += cpu_now_ms() - t0;
   }
 }
 
@@ -272,6 +294,102 @@ static int check_swipes() {
 }
 
 /* Settings is drawn: taps and drags land on the right controls. */
+/* Customize: the panel never hides an outline, at every layout; its buttons
+ * and the slots answer a fingertip; swipes stay on the page; Done closes. */
+static int check_editor() {
+  int fails = 0;
+  auto ok = [&](const char* what, bool cond) {
+    printf("  editor: %-48s %s\n", what, cond ? "ok" : "FAIL");
+    if (!cond) fails++;
+  };
+  const int oc = W > H ? 1 : 0;
+  const uint8_t lay0 = g_cfg.layout[oc];
+  nav_goto(PAGE_FACE, false);
+  run(300);
+  char why[400], what[96], name[48];
+  for (int l = 0; l < LAYOUT_COUNT; l++) {
+    nav_post_patch("{\"face\":{\"layout\":{\"%s\":\"%s\"}}}", oc ? "l" : "p", layout_key((LayoutId)l));
+    run(600);
+    face_editor_open();
+    run(300);
+    int np = face_editor_problems(why, sizeof(why));
+    snprintf(what, sizeof(what), "%s: panel clear of every outline", layout_get(oc, l).name);
+    ok(what, np == 0);
+    if (np) printf("    %s\n", why);
+    snprintf(name, sizeof(name), "11_editor_%s", layout_key((LayoutId)l));
+    shot(name);
+    face_editor_close();
+    run(200);
+  }
+  /* empty slots show a "+" in an outline of their shape */
+  {
+    uint8_t saved[FACE_MAX_SLOTS];
+    memcpy(saved, g_cfg.slots[oc][lay0], sizeof(saved));
+    char js[300];
+    int o = snprintf(js, sizeof(js), "{\"face\":{\"layout\":{\"%s\":\"%s\"},\"slots\":{\"%s\":{\"%s\":[",
+                     oc ? "l" : "p", layout_key((LayoutId)lay0), oc ? "l" : "p", layout_key((LayoutId)lay0));
+    const LayoutDef& L = layout_get(oc, lay0);
+    for (int i = 0; i < L.nslots; i++) /* every other slot empty */
+      o += snprintf(js + o, sizeof(js) - o, "%s\"%s\"", i ? "," : "", i % 2 ? "none" : comp_key((CompId)saved[i]));
+    snprintf(js + o, sizeof(js) - o, "]}}}}");
+    nav_post_patch("%s", js);
+    run(600);
+    face_editor_open();
+    run(300);
+    int np = face_editor_problems(why, sizeof(why));
+    ok("empty slots: panel clear of every outline", np == 0);
+    if (np) printf("    %s\n", why);
+    shot("11_editor_empty");
+    face_editor_close();
+    o = snprintf(js, sizeof(js), "{\"face\":{\"slots\":{\"%s\":{\"%s\":[", oc ? "l" : "p",
+                 layout_key((LayoutId)lay0));
+    for (int i = 0; i < L.nslots; i++) o += snprintf(js + o, sizeof(js) - o, "%s\"%s\"", i ? "," : "", comp_key((CompId)saved[i]));
+    snprintf(js + o, sizeof(js) - o, "]}}}}");
+    nav_post_patch("%s", js);
+    run(600);
+  }
+  face_editor_open();
+  run(300);
+  bool finger = s_touch.finger;
+  s_touch.finger = true;
+  auto tap_obj = [&](lv_obj_t* o) {
+    lv_area_t a;
+    lv_obj_get_coords(o, &a);
+    tap_at((a.x1 + a.x2) / 2, (a.y1 + a.y2) / 2);
+    run(300);
+  };
+  auto part = [&](int i, int j) { return lv_obj_get_child(lv_obj_get_child(face_editor_panel(), i), j); };
+  tap_obj(part(1, 2));
+  ok("finger: tap > shows the next layout", g_cfg.layout[oc] == (lay0 + 1) % LAYOUT_COUNT);
+  tap_obj(part(1, 0));
+  ok("finger: tap < goes back", g_cfg.layout[oc] == lay0);
+  tap_obj(part(2, 1));
+  ok("finger: tap a swatch sets the accent", memcmp(g_cfg.accent, ACCENT_PRESETS[1].rgb, 3) == 0);
+  ok("the chosen swatch wears the ring", lv_obj_has_state(part(2, 1), LV_STATE_CHECKED) &&
+                                             !lv_obj_has_state(part(2, 0), LV_STATE_CHECKED));
+  tap_obj(part(2, 0));
+  ok("finger: and back to green", memcmp(g_cfg.accent, ACCENT_PRESETS[0].rgb, 3) == 0);
+  finger_swipe_diag(W - 12, -W / 4, H - 12, 0);
+  ok("finger: a swipe shows the next layout", g_cfg.layout[oc] == (lay0 + 1) % LAYOUT_COUNT);
+  ok("...and doesn't leave the page", nav_current() == PAGE_FACE && face_editor_active());
+  finger_swipe_diag(12, W / 4, H - 12, 0);
+  ok("finger: a swipe back shows the previous one", g_cfg.layout[oc] == lay0);
+  uint32_t sheets = lv_obj_get_child_cnt(lv_layer_top());
+  {
+    const SlotDef& sd = layout_get(oc, lay0).slots[0];
+    tap_at(sd.x + sd.w / 2, sd.y + sd.h / 2);
+    run(700);
+  }
+  ok("finger: tap a widget opens its picker", lv_obj_get_child_cnt(lv_layer_top()) > sheets);
+  if (lv_obj_get_child_cnt(lv_layer_top()) > sheets) sheet_close(lv_obj_get_child(lv_layer_top(), -1));
+  run(800);
+  tap_obj(lv_obj_get_child(face_editor_panel(), 3));
+  ok("finger: Done closes it", !face_editor_active());
+  s_touch.finger = finger;
+  run(300);
+  return fails;
+}
+
 static int check_settings() {
   int fails = 0;
   auto ok = [&](const char* what, bool cond) {
@@ -518,7 +636,9 @@ static void gallery_draw(lv_event_t* e) {
   if (!fx_begin(dc, f)) return;
   for (int i = 0; i < s_ngcells; i++) {
     const GCell& c = s_gcells[i];
-    if (!_lv_area_is_on(&c.a, dc->clip_area)) continue;
+    lv_area_t reach = c.a; /* the guides sit on the cell's edges */
+    lv_area_increase(&reach, 2, 2);
+    if (!_lv_area_is_on(&reach, dc->clip_area)) continue;
     if (c.kind == 0) {
       comp_draw_preview(dc, c.comp, c.family, c.a, c.corner);
     } else {
@@ -665,10 +785,12 @@ static int run_gallery() {
   s_prefix = "g";
   lv_init();
   s_fb = (uint16_t*)calloc((size_t)W * H, 2);
-  s_buf1 = (lv_color_t*)malloc(sizeof(lv_color_t) * W * 32);
-  s_buf2 = (lv_color_t*)malloc(sizeof(lv_color_t) * W * 32);
+  /* the device's band height (main.cpp: two 7680-byte buffers) */
+  const int lines = LV_MAX(8, (getenv("FS_BUF") ? atoi(getenv("FS_BUF")) : 7680) / (W * 2));
+  s_buf1 = (lv_color_t*)malloc(sizeof(lv_color_t) * W * lines);
+  s_buf2 = (lv_color_t*)malloc(sizeof(lv_color_t) * W * lines);
   static lv_disp_draw_buf_t db;
-  lv_disp_draw_buf_init(&db, s_buf1, s_buf2, (uint32_t)W * 32);
+  lv_disp_draw_buf_init(&db, s_buf1, s_buf2, (uint32_t)W * lines);
   static lv_disp_drv_t dd;
   lv_disp_drv_init(&dd);
   dd.hor_res = (lv_coord_t)W;
@@ -725,13 +847,84 @@ static int run_gallery() {
   return s_shot_fails ? 1 : 0;
 }
 
+/* --bench: the work behind common moments, with the device's draw buffer.
+ * Host CPU time isn't ESP32 time, but the ratios and the profile carry over
+ * (run under valgrind --tool=callgrind to see where it goes). */
+static int run_bench() {
+  auto bench = [&](const char* name, auto&& fn) {
+    s_cpu_ms = 0;
+    s_frames = 0;
+    s_flushed_px = 0;
+    fn();
+    printf("  bench: %-34s %4u frames %8.0f px/frame %7.3f ms/frame %8.2f ms\n", name, s_frames,
+           s_frames ? (double)s_flushed_px / s_frames : 0.0, s_frames ? s_cpu_ms / s_frames : 0.0, s_cpu_ms);
+  };
+  const bool ls = W > H;
+  nav_post_patch("{\"face\":{\"theme\":\"dark\"}}");
+  run(2000);
+  bench("scope, sweep running, 5 s", [] { run(5000); });
+  bench("scope, full redraw x20", [] { refresh_all(20); });
+  static const char* const keys[] = {"modular", "focus", "full", "infograph"};
+  for (const char* k : keys) {
+    nav_post_patch("{\"face\":{\"layout\":{\"%s\":\"%s\"}}}", ls ? "l" : "p", k);
+    run(800);
+    char name[64];
+    snprintf(name, sizeof(name), "%s, full redraw x10", k);
+    bench(name, [] { refresh_all(10); });
+  }
+  bench("swipe to Sky and back", [] {
+    nav_goto(PAGE_SKY, true);
+    run(700);
+    nav_goto(PAGE_FACE, true);
+    run(700);
+  });
+  nav_goto(PAGE_SKY, false);
+  run(500);
+  bench("Sky, full redraw x10", [] { refresh_all(10); });
+  bench("Sky, scroll 160 px", [] {
+    lv_obj_t* tv = lv_obj_get_child(lv_scr_act(), 0);
+    lv_obj_t* page = lv_obj_get_child(lv_obj_get_child(tv, PAGE_SKY), 0);
+    for (int i = 0; i < 40; i++) {
+      lv_obj_scroll_by(page, 0, -4, LV_ANIM_OFF);
+      run(16);
+    }
+    lv_obj_scroll_to_y(page, 0, LV_ANIM_OFF);
+  });
+  nav_goto(PAGE_TRAFFIC, false);
+  run(500);
+  bench("Traffic, full redraw x10", [] { refresh_all(10); });
+  nav_goto(PAGE_SETTINGS, false);
+  run(500);
+  bench("Settings, full redraw x10", [] { refresh_all(10); });
+  nav_goto(PAGE_FACE, false);
+  run(500);
+  bench("flight sheet open and close", [] {
+    nav_show_flight(0xA00000);
+    run(700);
+    detail_close();
+    run(700);
+  });
+  face_editor_open();
+  run(500);
+  bench("Customize, idle 3 s", [] { run(3000); });
+  bench("Customize, next layout", [] {
+    lv_obj_t* next = lv_obj_get_child(lv_obj_get_child(face_editor_panel(), 1), 2);
+    lv_event_send(next, LV_EVENT_CLICKED, nullptr);
+    run(500);
+  });
+  face_editor_close();
+  run(300);
+  return 0;
+}
+
 int main(int argc, char** argv) {
-  bool landscape = false, small = false, gallery = false;
+  bool landscape = false, small = false, gallery = false, benchmark = false;
   for (int i = 1; i < argc; i++) {
     if (!strcmp(argv[i], "--landscape")) landscape = true;
     if (!strcmp(argv[i], "--small")) small = true; /* 2.8" CYD, 240x320 */
     if (!strcmp(argv[i], "--out") && i + 1 < argc) s_out = argv[++i];
     if (!strcmp(argv[i], "--gallery")) gallery = true;
+    if (!strcmp(argv[i], "--bench")) benchmark = true;
   }
   mkdir(s_out, 0755);
   if (small) {
@@ -792,6 +985,7 @@ int main(int argc, char** argv) {
   shot("01_disclaimer");
   tap_label("ACCEPT");
   run(1500);
+  if (benchmark) return run_bench();
   shot("02_scope_instruments_night");
 
   /* SPI budget: pixels pushed per frame with the sweep running */
@@ -919,7 +1113,7 @@ int main(int argc, char** argv) {
   run(800);
   face_editor_close();
   run(600);
-  int swipe_fails = check_swipes() + check_settings();
+  int swipe_fails = check_swipes() + check_settings() + check_editor();
 
   ui_start_calibration();
   run(800);

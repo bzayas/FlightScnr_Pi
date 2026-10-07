@@ -88,9 +88,16 @@ Besides the screenshots, it:
 
 - reports how many pixels each radar frame sends over SPI;
 - checks that short swipes and flicks turn the page, with a stylus and with a simulated fingertip (a first contact that lands off target, dropped samples and sideways jitter);
-- checks that Settings' switches, segmented controls and sliders respond to taps.
+- checks that Settings' switches, segmented controls and sliders respond to taps;
+- checks Customize at every layout: the panel is on screen and covers no outline, and its arrows, swatches, swipes, slots and Done answer a fingertip.
 
 It exits with an error if a check fails. CI runs all four sizes.
+
+`--bench` times what the UI core does in common moments (the scope with the sweep running, full redraws of each layout and page, a page swipe, scrolling Sky, a sheet opening, Customize) with the device's draw buffer, and prints frames, pixels and CPU time per frame. Host time isn't ESP32 time, but the ratios carry over; run it under `valgrind --tool=callgrind` to see where the time goes. On the device, the `[ui]` log line reports real frame times.
+
+```bash
+sim/build/fs_sim --small --landscape --bench --out /tmp/bench
+```
 
 For design work, `--gallery` renders every widget at every slot size the layouts use (both screen sizes, both orientations, day and night), and every glyph at five sizes, each with and without alignment guides:
 
@@ -158,11 +165,13 @@ Requests go through a small HTTP/1.0 client on plain sockets (`net/fetch.cpp`), 
 
 ### Drawing
 
-- **Two DMA buffers** of 16 lines each: LVGL renders the next band while the previous one goes out over SPI.
+- **Two 7.5 KB DMA buffers** (12 lines at 320 px wide, 16 at 240): LVGL renders the next band while the previous one goes out over SPI. Every band redraws each object it crosses, so anything a draw callback measures is cached: text widths (`ui_text_size()`, 256 entries, ~97% hits) and font metrics. Labels test whether they cross the band before they're measured at all.
 - **A small anti-aliased rasterizer** (`ui/fx.cpp`) draws the radar, icons and gauges straight into LVGL's buffer: discs, rings, arcs, capsules, polygons, and rotated, filtered icon masks.
 - **Only what changed is redrawn.** Each aircraft, tag and the sweep wedge has its own dirty rectangle; a steady radar frame sends about 15–28 thousand pixels (6–10 ms of SPI), depending on how many aircraft and tags are moving.
 - **Drawn lists.** Traffic and Settings paint their rows in one object instead of hundreds of LVGL widgets: Settings went from 28 KB to about 1 KB. Pages are built when you swipe towards them and freed when you leave.
 - **Smooth motion** from dead reckoning: aircraft move along their heading between updates, and corrections ease in.
+- **The radar rests** (no sweep, aircraft moved twice a second) while Customize dims it or a sheet covers it, so the screen isn't redrawn under whatever the finger is doing.
+- **Rasterizer spans.** Discs fill each row's solid middle in one run; capsules skip the square root away from their edge; icon masks only visit the part of each row inside the rotated icon, stepping through it incrementally; arcs are bounded by their own extent, not their circle's.
 - **Text by its ink.** Widgets place figures and capitals by where their ink sits in the font (`ink()` in `ui/complications.cpp`), not by the line box. Values and units share a baseline, and each widget family picks the largest arrangement that fits its slot (value and unit, value, then a short form).
 
 ### Touch
@@ -177,6 +186,12 @@ The XPT2046 is resistive. A stylus gives clean samples; a fingertip presses ligh
 The touch controller's pen-down line (IRQ) also blinks off under a light finger, and LovyanGFX skips samples while it's off. `Touch_CYD` in `hal/lgfx_board.h` uses the line only to detect the start of a touch; during a touch, the pressure reading alone decides. The touch SPI clock is 1 MHz, which gives the ADC time to settle on a light, high-resistance contact.
 
 A page turns once the drag has travelled a tenth of the screen width (at least 20 px), or with a flick (`pager_feedback` in `ui/ui.cpp`).
+
+### Customize
+
+`ui/face.cpp`. Each widget's outline is measured from what it draws: `comp_content_area()` runs the widget's renderer with an `Fx` in measuring mode (`fx_begin_measure()`), where text, glyphs and shapes grow a box instead of drawing. Circles get rings concentric with their discs. Outlines that would touch give way on the sides facing each other, never into their content. The panel tries three sizes, centred on the radar with a few pixels' leeway, and takes the largest that covers no outline. `face_editor_problems()` checks the result, and the simulator runs it at every layout.
+
+Widgets keep their text 6 px (2.8″) or 8 px (4″) from the screen's edges (`text_area_of()` in `ui/complications.cpp`), clear of the bezel and of the outlines.
 
 ### Layouts and the full-screen radar
 

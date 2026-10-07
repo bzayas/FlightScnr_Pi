@@ -14,7 +14,7 @@
 #include "theme.h"
 
 lv_style_t ST_SCREEN, ST_CARD, ST_TITLE, ST_TEXT, ST_TEXT2, ST_CAPTION, ST_SEP;
-lv_style_t ST_BTN, ST_BTN_PR, ST_BTN_ACCENT, ST_ROW_PR, ST_ICON_TILE;
+lv_style_t ST_BTN, ST_BTN_PR, ST_BTN_ACCENT, ST_BTN_ACCENT_PR, ST_FILL, ST_ROW_PR, ST_ICON_TILE;
 lv_style_t ST_SWITCH, ST_SWITCH_ON, ST_SWITCH_KNOB, ST_SLIDER, ST_SLIDER_IND, ST_SLIDER_KNOB;
 /* List rows share these instead of carrying their own style copies: a
  * settings page has ~30 rows, and RAM is the scarce thing on this board. */
@@ -22,7 +22,8 @@ static lv_style_t ST_ROW, ST_ROW_TITLE, ST_ROW_VALUE, ST_ROW_CHEVRON;
 static int s_tile_px, s_padh, s_gap;
 
 static lv_style_t* const ALL[] = {&ST_SCREEN, &ST_CARD,   &ST_TITLE,      &ST_TEXT,       &ST_TEXT2,       &ST_CAPTION,
-                                  &ST_SEP,    &ST_BTN,    &ST_BTN_PR,     &ST_BTN_ACCENT, &ST_ROW_PR,      &ST_ICON_TILE,
+                                  &ST_SEP,    &ST_BTN,    &ST_BTN_PR,     &ST_BTN_ACCENT, &ST_BTN_ACCENT_PR, &ST_FILL,
+                                  &ST_ROW_PR, &ST_ICON_TILE,
                                   &ST_SWITCH, &ST_SWITCH_ON, &ST_SWITCH_KNOB, &ST_SLIDER, &ST_SLIDER_IND, &ST_SLIDER_KNOB,
                                   &ST_ROW,    &ST_ROW_TITLE, &ST_ROW_VALUE, &ST_ROW_CHEVRON};
 
@@ -40,6 +41,9 @@ static void apply_colors() {
   lv_style_set_bg_color(&ST_BTN_PR, p.sep);
   lv_style_set_bg_color(&ST_BTN_ACCENT, p.blue);
   lv_style_set_text_color(&ST_BTN_ACCENT, lv_color_white());
+  lv_style_set_bg_color(&ST_BTN_ACCENT_PR, color_mix(p.blue, lv_color_black(), 0.22f)); /* blue, pressed in */
+  lv_style_set_bg_color(&ST_FILL, p.dark ? color_rgb(58, 58, 62) : color_rgb(229, 229, 234)); /* tertiary fill */
+  lv_style_set_text_color(&ST_FILL, p.text);
   lv_style_set_bg_color(&ST_ROW_PR, p.sep);
   lv_style_set_text_color(&ST_ICON_TILE, lv_color_white());
   lv_style_set_bg_color(&ST_SWITCH, p.dark ? color_rgb(57, 57, 61) : color_rgb(220, 220, 225));
@@ -53,6 +57,32 @@ static void apply_colors() {
   lv_style_set_text_color(&ST_ROW_CHEVRON, p.text2);
 }
 
+lv_point_t ui_text_size(const char* s, const lv_font_t* f, int letter_space) {
+  /* 256 entries hit ~97% of the time (a scope with its widgets uses ~150);
+   * a 32-bit key over the bytes, the font and the length, and the width:
+   * 1.5 KB */
+  static uint32_t keys[256];
+  static int16_t widths[256];
+  uint32_t h = 2166136261u ^ (uint32_t)letter_space; /* FNV-1a */
+  int lines = 1, n = 0;
+  for (const char* p = s; *p; p++, n++) {
+    h = (h ^ (uint8_t)*p) * 16777619u;
+    if (*p == '\n') lines++;
+  }
+  h = ((h ^ (uint32_t)(uintptr_t)f) * 16777619u ^ ((uint32_t)n << 22)) | 1; /* never 0: 0 is an empty slot */
+  lv_point_t sz;
+  sz.y = (lv_coord_t)(lines * lv_font_get_line_height(f));
+  uint32_t i = (h ^ (h >> 16)) & 255;
+  if (keys[i] == h) {
+    sz.x = widths[i];
+    return sz;
+  }
+  lv_txt_get_size(&sz, s, f, (lv_coord_t)letter_space, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
+  keys[i] = h;
+  widths[i] = (int16_t)sz.x;
+  return sz;
+}
+
 void widgets_init() {
   for (auto s : ALL) lv_style_init(s);
   lv_style_set_bg_opa(&ST_SCREEN, LV_OPA_COVER);
@@ -61,7 +91,6 @@ void widgets_init() {
   lv_style_set_radius(&ST_CARD, 14);
   lv_style_set_pad_all(&ST_CARD, 0);
   lv_style_set_pad_row(&ST_CARD, 0);
-  lv_style_set_clip_corner(&ST_CARD, true);
 
   lv_style_set_text_font(&ST_TITLE, &fs_text_30);
   lv_style_set_text_font(&ST_TEXT, &fs_text_16);
@@ -78,6 +107,8 @@ void widgets_init() {
   lv_style_set_text_font(&ST_BTN, &fs_text_16);
   lv_style_set_bg_opa(&ST_BTN_PR, LV_OPA_COVER);
   lv_style_set_bg_opa(&ST_BTN_ACCENT, LV_OPA_COVER);
+  lv_style_set_bg_opa(&ST_BTN_ACCENT_PR, LV_OPA_COVER);
+  lv_style_set_bg_opa(&ST_FILL, LV_OPA_COVER);
 
   lv_style_set_bg_opa(&ST_ROW_PR, LV_OPA_COVER);
 
@@ -206,6 +237,9 @@ lv_obj_t* w_section(lv_obj_t* page, const char* caption) {
   lv_obj_t* card = lv_obj_create(page);
   lv_obj_remove_style_all(card);
   lv_obj_add_style(card, &ST_CARD, 0);
+  /* a pressed row's highlight stays inside the rounded corners; only lists
+   * need this (it masks everything drawn inside, which costs) */
+  lv_obj_set_style_clip_corner(card, true, 0);
   lv_obj_set_width(card, LV_PCT(100));
   lv_obj_set_height(card, LV_SIZE_CONTENT);
   lv_obj_set_flex_flow(card, LV_FLEX_FLOW_COLUMN);
@@ -292,7 +326,7 @@ lv_obj_t* w_button(lv_obj_t* parent, const char* text, bool accent) {
   lv_obj_remove_style_all(b);
   lv_obj_add_style(b, &ST_BTN, 0);
   if (accent) lv_obj_add_style(b, &ST_BTN_ACCENT, 0);
-  lv_obj_add_style(b, &ST_BTN_PR, LV_STATE_PRESSED);
+  lv_obj_add_style(b, accent ? &ST_BTN_ACCENT_PR : &ST_BTN_PR, LV_STATE_PRESSED);
   lv_obj_t* l = w_label(b, text, ui_compact() ? &fs_text_14 : &fs_text_16, nullptr);
   lv_obj_center(l);
   return b;

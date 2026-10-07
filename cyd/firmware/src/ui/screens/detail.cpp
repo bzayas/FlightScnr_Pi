@@ -58,8 +58,8 @@ static bool lookup(uint32_t icao, Flight* out) {
 
 static void t(lv_draw_ctx_t* dc, const char* s, const lv_font_t* f, lv_color_t c, int x, int y, lv_text_align_t al) {
   if (!s || !*s) return;
-  lv_point_t sz;
-  lv_txt_get_size(&sz, s, f, 0, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
+  if (y > dc->clip_area->y2 || y + lv_font_get_line_height(f) < dc->clip_area->y1) return; /* not in this band */
+  lv_point_t sz = ui_text_size(s, f);
   int x1 = al == LV_TEXT_ALIGN_CENTER ? x - sz.x / 2 : (al == LV_TEXT_ALIGN_RIGHT ? x - sz.x : x);
   lv_area_t a = {(lv_coord_t)x1, (lv_coord_t)y, (lv_coord_t)(x1 + sz.x), (lv_coord_t)(y + sz.y)};
   if (!_lv_area_is_on(&a, dc->clip_area)) return;
@@ -207,8 +207,7 @@ static void body_draw(lv_event_t* e) {
   if (!isnan(fl.track)) {
     /* a small compass just after the heading, centred on its figures */
     const float rr = cp ? 9.0f : 12.0f;
-    lv_point_t vs;
-    lv_txt_get_size(&vs, v, mm.val_font, 0, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
+    lv_point_t vs = ui_text_size(v, mm.val_font);
     const lv_font_t* vf = mm.val_font;
     int base = vf->line_height - vf->base_line;
     lv_font_glyph_dsc_t g;

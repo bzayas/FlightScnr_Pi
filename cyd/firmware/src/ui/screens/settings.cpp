@@ -279,11 +279,7 @@ static int item_at(lv_coord_t y) {
   return -1;
 }
 
-static int text_w(const char* s, const lv_font_t* f, int ls = 0) {
-  lv_point_t sz;
-  lv_txt_get_size(&sz, s, f, (lv_coord_t)ls, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
-  return sz.x;
-}
+static int text_w(const char* s, const lv_font_t* f, int ls = 0) { return ui_text_w(s, f, ls); }
 
 /* The trailing control's box (switch, segmented, slider track, dots). */
 static lv_area_t control_area(int item, const lv_area_t& row) {

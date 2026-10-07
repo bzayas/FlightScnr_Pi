@@ -13,6 +13,28 @@
 
 Versions are `year.month.day.iteration`. The version you're running is under **Settings → About** on the display.
 
+## 2026.10.7.9
+
+- **Customize, redesigned.**
+  - The controls sit in the middle, over the radar, and never cover a widget. They step down to a compact size where space is tight.
+  - Each outline is drawn around what the widget actually shows, with one stroke and one gap everywhere, instead of around the slot's box. Outlines no longer run off the screen or into each other. Empty slots show a **+**.
+  - Larger round **‹ ›** buttons, with dots showing which of the four layouts you're on. **Swipe sideways** anywhere to change the layout.
+  - The chosen accent has a ring. Swatches press in, and **Done** darkens when pressed.
+  - The radar dims and rests while you edit, and nothing animates. The screen used to redraw the outlines and the whole editor continuously, which made taps slow to register. Swipes no longer leave the page while editing.
+  - Closing the widget list with **×** or a swipe no longer stops the next tap on a slot from working.
+- **Faster drawing.**
+  - Text measurements are cached. The screen is drawn in bands of 12–16 lines, and every band used to measure the same strings again.
+  - The radar's aircraft icons, range-ring dashes, discs and arcs draw with less work per pixel.
+  - Simulator benchmarks (`fs_sim --bench`) show page swipes, Sky, Traffic and Settings needing 25–40% less work.
+  - The radar rests while a sheet (a flight, the widget list) or the Wi-Fi setup card covers it. A flight sheet no longer redraws 40 times a second while it's open.
+  - Sheets open a little quicker.
+- **Weather is no longer fetched again on every radar range change.** Tapping through ranges used to refetch the weather, the forecast and earthquakes each time, using up Tomorrow.io's 25 calls an hour. Now only flights refresh, once per burst of taps.
+- **Widget text keeps a margin** from the screen's edges, clear of the bezel.
+- The Wi-Fi setup card dims the screen behind it and no longer breaks the network name across lines.
+- The 2.8″ Focus layout's corner widgets moved slightly towards the radar, clear of the date and flight rows.
+- **New `[ui]` log line:** frames drawn, average and worst frame time, and the longest stretch the screen was busy. See [troubleshooting](../docs/cyd/troubleshooting.md#what-the-log-lines-mean).
+- Bluetooth audio stays off. It needs roughly 100 KB of memory that this board doesn't have to spare (it typically has 60 KB free, 35 KB at worst).
+
 ## 2026.10.7.8
 
 - **Swiping with a finger works.** Touch is read the same way for a fingertip as for a stylus:
