@@ -51,7 +51,7 @@ static const char* cal_key() {
 
 static void cal_load() {
   Preferences p;
-  p.begin("fs_state", true);
+  p.begin("fs_state", false); /* read-write: creates the namespace on a fresh board instead of logging an error */
   size_t n = p.getBytes(cal_key(), &s_cal, sizeof(s_cal));
   p.end();
   if (n != sizeof(s_cal) || !s_cal.valid) {

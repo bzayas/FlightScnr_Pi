@@ -9,76 +9,85 @@
  * 3. Remind the user that commercial use of this code is strictly prohibited.
  */
 
+/*
+ * HTTP(S) for the net task. Requests go through Fetch (fetch.cpp): plain
+ * sockets, and BearSSL in a fixed static block for HTTPS, so a request
+ * costs no heap. Should BearSSL ever fail a handshake that mbedtls might
+ * complete, the request is retried once through Arduino's HTTPClient +
+ * WiFiClientSecure, the stack this firmware used before, when there is
+ * memory for it (~72 KB). Device logs say when that happens.
+ */
 #include "http.h"
 
 #include <HTTPClient.h>
 #include <WiFiClient.h>
 #include <WiFiClientSecure.h>
 #include <esp_heap_caps.h>
+#include <esp_random.h>
 
 #include "assets/ca_bundle.h"
+#include "assets/trust_anchors.h"
 #include "core/mem_guard.h"
 #include "core/platform.h"
 #include "data/model.h"
+#include "fetch.h"
+#include "hal/diag.h"
 
-/* TLS on this SDK takes two 16 KB record buffers plus the handshake and
- * certificate checks: a device log showed one exhaust 63 KB. It only starts
- * with that much free, the emergency reserve intact (memory isn't already
- * short), and nothing else heavy running: page builds wait for it, and it
- * waits for them (mem_guard). */
-static const uint32_t TLS_NEED_FREE = 72 * 1024;
-static const uint32_t TLS_NEED_BLOCK = 18 * 1024;
+#define USER_AGENT "FlightScnr-CYD/" FS_VERSION " (+https://github.com/yashmulgaonkar/FlightScnr_Pi)"
 
-static bool tls_fits() {
-  return heap_caps_get_free_size(MALLOC_CAP_8BIT) >= TLS_NEED_FREE &&
-         heap_caps_get_largest_free_block(MALLOC_CAP_8BIT) >= TLS_NEED_BLOCK && mem_guard_reserve_ok();
-}
+volatile uint32_t g_http_retry_after_s;
+static uint32_t s_tls_full, s_tls_resumed, s_tls_legacy;
 
-/* Waits briefly for a page build to finish. */
-static bool take_heavy() {
-  for (int i = 0; i < 25; i++) {
-    if (mem_heavy_try_begin()) return true;
-    vTaskDelay(pdMS_TO_TICKS(20));
-  }
-  return false;
-}
+/* ---- Fetch's platform hooks ----------------------------------------------- */
 
-struct HeavyGuard {
-  bool held = false;
-  ~HeavyGuard() {
-    if (held) mem_heavy_end();
-  }
-};
+uint32_t fetch_platform_ms() { return millis(); }
+time_t fetch_platform_time() { return plat_time_valid() ? time(nullptr) : 0; }
+void fetch_platform_random(void* buf, size_t n) { esp_fill_random(buf, n); }
+void fetch_platform_phase(const char* what, const char* host) { net_phase(what, host); }
 
-/* Public, keyless feeds that also answer over plain HTTP. When memory is too
- * tight for TLS, these still work. Never add a host that takes an API key or
- * anything private. */
-static const char* const PLAIN_OK[] = {"api.adsb.lol/", "api.open-meteo.com/"};
+/* ---- response bodies -------------------------------------------------------- */
 
-/* Arduino's Stream::timedRead() polls the socket without ever blocking while
- * it waits for the next packet. The net task runs on core 0 above the idle
- * task, so a feed that took over 5 s to arrive (100+ KB through lwIP's 5.7 KB
- * TCP window) never let IDLE0 run, and the task watchdog reset the board
- * (2026.10.7.3 device logs: "task_wdt ... CPU 0: net"). Reads here sleep a
- * tick whenever the socket is empty instead. */
-template <class Base>
-class YieldingClient : public Base {
+/* Body bytes: > 0 read, 0 at the end, < 0 an error. May block (it sleeps). */
+class BodySource {
  public:
-  using Base::read;
-  int read() override { /* what timedRead() polls, e.g. for the status line and headers */
-    int c = Base::read();
-    if (c < 0) vTaskDelay(1);
-    return c;
-  }
+  virtual int read(uint8_t* buf, size_t n) = 0;
 };
 
-/* The response body for the parsers: read in chunks rather than a byte (and
- * a TLS record lookup) at a time. Gives up after `idle_ms` without data, or
- * once the server has closed the connection and nothing is left. */
+class FetchSource : public BodySource {
+ public:
+  explicit FetchSource(Fetch& f) : f_(f) {}
+  int read(uint8_t* buf, size_t n) override { return f_.read(buf, n); }
+
+ private:
+  Fetch& f_;
+};
+
+/* The fallback's WiFiClient: its reads never block, so wait here, asleep. */
+class ClientSource : public BodySource {
+ public:
+  ClientSource(WiFiClient& c, uint32_t idle_ms) : c_(c), idle_ms_(idle_ms) {}
+  int read(uint8_t* buf, size_t n) override {
+    uint32_t start = millis();
+    for (;;) {
+      int r = c_.read(buf, n);
+      if (r > 0) return r;
+      if (!c_.connected() && c_.available() <= 0) return 0;
+      if (millis() - start >= idle_ms_) return -1;
+      vTaskDelay(pdMS_TO_TICKS(2));
+    }
+  }
+
+ private:
+  WiFiClient& c_;
+  uint32_t idle_ms_;
+};
+
+/* What the parsers read: chunked reads, and a short sleep every 50 ms so
+ * parsing a big feed never keeps core 0 from its idle task. */
 class BodyStream : public Stream {
  public:
-  BodyStream(WiFiClient& c, uint32_t idle_ms) : c_(c), idle_ms_(idle_ms), yielded_(millis()) {}
-  int available() override { return (int)(n_ - pos_) + c_.available(); }
+  explicit BodyStream(BodySource& s) : src_(s), yielded_(millis()) {}
+  int available() override { return (int)(n_ - pos_); }
   int read() override { return fill() ? buf_[pos_++] : -1; }
   int peek() override { return fill() ? buf_[pos_] : -1; }
   size_t readBytes(char* out, size_t len) override {
@@ -96,110 +105,193 @@ class BodyStream : public Stream {
  private:
   bool fill() {
     if (pos_ < n_) return true;
-    uint32_t start = millis();
-    for (;;) {
-      if (millis() - yielded_ > 50) { /* parsing a big feed is CPU work too */
-        vTaskDelay(1);
-        yielded_ = millis();
-      }
-      int r = c_.read(buf_, sizeof(buf_));
-      if (r > 0) {
-        pos_ = 0;
-        n_ = (size_t)r;
-        return true;
-      }
-      if (millis() - start >= idle_ms_) return false;
-      if (!c_.connected() && c_.available() <= 0) return false;
-      vTaskDelay(pdMS_TO_TICKS(2));
+    if (millis() - yielded_ > 50) {
+      vTaskDelay(1);
       yielded_ = millis();
     }
+    int r = src_.read(buf_, sizeof(buf_));
+    if (r <= 0) return false;
+    pos_ = 0;
+    n_ = (size_t)r;
+    return true;
   }
-  WiFiClient& c_;
-  uint32_t idle_ms_, yielded_;
+  BodySource& src_;
+  uint32_t yielded_;
   size_t pos_ = 0, n_ = 0;
   static uint8_t buf_[1024]; /* only the net task makes requests */
 };
 uint8_t BodyStream::buf_[1024];
 
-/* "api.example.com" from a URL, for log lines. */
-static void url_host(const char* url, char* out, size_t n) {
-  const char* h = strstr(url, "://");
-  h = h ? h + 3 : url;
-  size_t len = strcspn(h, "/?:");
-  snprintf(out, n, "%.*s", (int)len, h);
+/* ---- fallback: HTTPClient + WiFiClientSecure (mbedtls) ------------------ */
+
+/* mbedtls takes two 16 KB record buffers plus the handshake (~58 KB in
+ * device logs), so it only starts with that much free, the emergency
+ * reserve intact, and no page being built (mem_guard). */
+static const uint32_t TLS_NEED_FREE = 72 * 1024;
+static const uint32_t TLS_NEED_BLOCK = 18 * 1024;
+
+static bool legacy_fits() {
+  return heap_caps_get_free_size(MALLOC_CAP_8BIT) >= TLS_NEED_FREE &&
+         heap_caps_get_largest_free_block(MALLOC_CAP_8BIT) >= TLS_NEED_BLOCK && mem_guard_reserve_ok();
 }
 
-int http_get(const char* url, HttpBodyFn fn, void* ctx, uint32_t timeout_ms) {
-  bool https = strncmp(url, "https://", 8) == 0;
-  char plain_url[512]; /* the Open-Meteo URL alone is ~420 characters */
-  HeavyGuard heavy;
-  if (https) heavy.held = tls_fits() && take_heavy();
-  if (https && heavy.held && !tls_fits()) { /* memory moved while we waited */
-    mem_heavy_end();
-    heavy.held = false;
+/* Arduino's Stream::timedRead() polls without yielding: let it sleep. */
+template <class Base>
+class YieldingClient : public Base {
+ public:
+  using Base::read;
+  int read() override {
+    int c = Base::read();
+    if (c < 0) vTaskDelay(1);
+    return c;
   }
-  if (https && !heavy.held) {
-    bool ok = false;
-    for (const char* h : PLAIN_OK)
-      if (strncmp(url + 8, h, strlen(h)) == 0) ok = true;
-    if (!ok || strlen(url) >= sizeof(plain_url)) {
-      g_https_wait_ms = millis() | 1;
-      return HTTP_ERR_LOW_MEMORY;
-    }
-    snprintf(plain_url, sizeof(plain_url), "http://%s", url + 8);
-    url = plain_url;
-    https = false;
-    static bool told;
-    if (!told) {
-      told = true;
-      Serial.println("[http] low memory: using plain HTTP for public feeds (adsb.lol, Open-Meteo)");
-    }
-  }
-  uint32_t low_before = heap_caps_get_minimum_free_size(MALLOC_CAP_8BIT);
-  uint32_t free_before = heap_caps_get_free_size(MALLOC_CAP_8BIT);
+};
 
-  YieldingClient<WiFiClient> plain;
+static int legacy_get(const char* url, HttpBodyFn fn, void* ctx, uint32_t timeout_ms) {
+  bool heavy = false;
+  for (int i = 0; i < 25 && !(heavy = mem_heavy_try_begin()); i++) vTaskDelay(pdMS_TO_TICKS(20));
+  if (!heavy || !legacy_fits()) {
+    if (heavy) mem_heavy_end();
+    g_https_wait_ms = millis() | 1;
+    return HTTP_ERR_LOW_MEMORY;
+  }
+  s_tls_legacy++;
   YieldingClient<WiFiClientSecure> tls;
   HTTPClient http;
   http.useHTTP10(true); /* no chunked encoding: parse straight off the socket */
   http.setReuse(false);
   http.setTimeout((uint16_t)timeout_ms);
   http.setConnectTimeout(6000);
-  http.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
-  http.setUserAgent("FlightScnr-CYD/" FS_VERSION " (+https://github.com/yashmulgaonkar/FlightScnr_Pi)");
+  http.setUserAgent(USER_AGENT);
+  tls.setCACertBundle(CA_BUNDLE);
+  tls.setHandshakeTimeout(12);
+  int code = HTTPC_ERROR_CONNECTION_REFUSED;
+  if (http.begin(tls, url)) {
+    http.addHeader("Accept", "application/json");
+    code = http.GET();
+    if (code == HTTP_CODE_OK && fn) {
+      ClientSource src(http.getStream(), timeout_ms);
+      BodyStream body(src);
+      if (!fn(body, http.getSize(), ctx)) code = HTTP_ERR_PARSE;
+    }
+    http.end();
+  }
+  mem_heavy_end();
+  return code;
+}
 
-  bool ok;
-  if (https) {
-    tls.setCACertBundle(CA_BUNDLE);
-    tls.setHandshakeTimeout(12);
-    ok = http.begin(tls, url);
+/* ---- requests --------------------------------------------------------------- */
+
+/* Public, keyless feeds that also answer over plain HTTP: used only while
+ * the clock isn't set yet (certificates can't be checked without it).
+ * Never add a host that takes an API key or anything private. */
+static const char* const PLAIN_OK[] = {"api.adsb.lol", "api.open-meteo.com"};
+
+static bool plain_ok(const char* host) {
+  for (const char* h : PLAIN_OK)
+    if (!strcmp(host, h)) return true;
+  return false;
+}
+
+static bool is_redirect(int code) {
+  return code == 301 || code == 302 || code == 303 || code == 307 || code == 308;
+}
+
+/* BearSSL errors worth a name in the log (bearssl_ssl.h, bearssl_x509.h). */
+static const char* tls_error_name(int e) {
+  switch (e) {
+    case BR_ERR_X509_NOT_TRUSTED: return "certificate not from a known root";
+    case BR_ERR_X509_EXPIRED: return "certificate expired or clock wrong";
+    case BR_ERR_X509_BAD_SERVER_NAME: return "certificate for another name";
+    case BR_ERR_UNSUPPORTED_VERSION: return "server needs another TLS version";
+    case BR_ERR_BAD_CIPHER_SUITE: return "no common cipher";
+    case BR_ERR_RECV_FATAL_ALERT: return "server sent an alert";
+    case BR_ERR_TOO_LARGE: return "record too large";
+    default: return "";
+  }
+}
+
+static Fetch s_fetch;
+static char s_url[2][512]; /* redirects and the plain-HTTP rewrite; net task only */
+
+int http_get(const char* url, HttpBodyFn fn, void* ctx, uint32_t timeout_ms) {
+  static bool started;
+  if (!started) {
+    started = true;
+    fetch_set_trust_anchors(FS_TRUST_ANCHORS, FS_TRUST_ANCHORS_NUM);
+  }
+  g_http_retry_after_s = 0;
+  FetchUrl u;
+  if (!fetch_parse_url(url, u)) return FETCH_ERR_URL;
+  net_phase("request", u.host);
+
+  if (u.https && !plat_time_valid()) { /* NTP normally lands within seconds of Wi-Fi */
+    for (int i = 0; i < 50 && !plat_time_valid(); i++) vTaskDelay(pdMS_TO_TICKS(100));
+    if (!plat_time_valid()) {
+      if (!plain_ok(u.host)) return FETCH_ERR_NO_TIME;
+      snprintf(s_url[0], sizeof(s_url[0]), "http://%s", url + 8);
+      url = s_url[0];
+      u.https = false;
+    }
+  }
+
+  int code = 0;
+  int slot = 1;
+  bool retried = false;
+  for (int hop = 0;; hop++) {
+    code = s_fetch.get(url, timeout_ms, USER_AGENT);
+    if ((code == FETCH_ERR_TIMEOUT || code == FETCH_ERR_CLOSED || code == FETCH_ERR_CONNECT) && !retried) {
+      /* Nothing came back: once more, on a new connection (round-robin DNS
+       * usually means another server). */
+      retried = true;
+      code = s_fetch.get(url, timeout_ms, USER_AGENT);
+    }
+    if (u.https && code > 0) (s_fetch.resumed() ? s_tls_resumed : s_tls_full)++;
+    if (!is_redirect(code) || hop >= 2 || !s_fetch.location()[0]) break;
+    /* Follow within the same host, never from HTTPS down to HTTP. */
+    const char* loc = s_fetch.location();
+    char* next = s_url[slot];
+    if (loc[0] == '/')
+      snprintf(next, sizeof(s_url[0]), "%s://%s%s", u.https ? "https" : "http", u.host, loc);
+    else
+      snprintf(next, sizeof(s_url[0]), "%s", loc);
+    FetchUrl nu;
+    if (!fetch_parse_url(next, nu) || strcmp(nu.host, u.host) || (u.https && !nu.https)) break;
+    s_fetch.close();
+    url = next;
+    u = nu;
+    slot ^= 1;
+  }
+
+  if (code == FETCH_ERR_TLS) {
+    int e = s_fetch.tls_error();
+    s_fetch.close();
+    static char told_host[64];
+    if (strcmp(told_host, u.host)) {
+      snprintf(told_host, sizeof(told_host), "%s", u.host);
+      Serial.printf("[http] %s: TLS error %d %s; trying mbedtls\n", u.host, e, tls_error_name(e));
+    }
+    int legacy = legacy_get(url, fn, ctx, timeout_ms);
+    if (legacy != HTTP_ERR_LOW_MEMORY) code = legacy;
   } else {
-    ok = http.begin(plain, url);
+    if (code == 200 && fn) {
+      net_phase("parse", u.host);
+      FetchSource src(s_fetch);
+      BodyStream body(src);
+      if (!fn(body, (int)s_fetch.content_length(), ctx)) code = HTTP_ERR_PARSE;
+    }
+    g_http_retry_after_s = s_fetch.retry_after_s();
+    s_fetch.close();
   }
-  if (!ok) return HTTPC_ERROR_CONNECTION_REFUSED;
-  http.addHeader("Accept", "application/json");
+  net_phase("idle");
 
-  int code = http.GET();
-  if (code == HTTP_CODE_OK && fn) {
-    BodyStream body(http.getStream(), timeout_ms);
-    if (!fn(body, http.getSize(), ctx)) code = HTTP_ERR_PARSE;
-  }
-  http.end();
-  char host[48];
-  url_host(url, host, sizeof(host));
-  if (https) { /* what TLS really costs on this board, when it sets a new low */
-    uint32_t low = heap_caps_get_minimum_free_size(MALLOC_CAP_8BIT);
-    if (low < low_before)
-      Serial.printf("[http] %s %d: free %u KB before, %u KB at its peak (HTTPS)\n", host, code,
-                    (unsigned)(free_before / 1024), (unsigned)(low / 1024));
-  }
-  static char last_host[48];
+  static char last_host[64];
   static int last_code;
-  if (code < 0 && (code != last_code || strcmp(host, last_host))) { /* each new failure once */
-    Serial.printf("[http] %s: %d %s\n", host, code, http_reason(code));
-    snprintf(last_host, sizeof(last_host), "%s", host);
+  if (code < 0 && (code != last_code || strcmp(u.host, last_host))) { /* each new failure once */
+    Serial.printf("[http] %s: %d %s\n", u.host, code, http_reason(code));
+    snprintf(last_host, sizeof(last_host), "%s", u.host);
     last_code = code;
-  } else if (code >= 0 && !strcmp(host, last_host)) {
+  } else if (code >= 0 && !strcmp(u.host, last_host)) {
     last_host[0] = 0;
   }
   return code;
@@ -224,6 +316,12 @@ int http_get_json(const char* url, JsonDocument& doc, const JsonDocument* filter
   return http_get(url, json_body, &ctx, timeout_ms);
 }
 
+void http_stats(uint32_t* full, uint32_t* resumed, uint32_t* legacy) {
+  *full = s_tls_full;
+  *resumed = s_tls_resumed;
+  *legacy = s_tls_legacy;
+}
+
 const char* http_reason(int code) {
   switch (code) {
     case 200: return "OK";
@@ -233,6 +331,14 @@ const char* http_reason(int code) {
     case 429: return "rate limited";
     case HTTP_ERR_LOW_MEMORY: return "low memory";
     case HTTP_ERR_PARSE: return "bad response";
+    case FETCH_ERR_URL: return "bad address";
+    case FETCH_ERR_DNS: return "host not found";
+    case FETCH_ERR_CONNECT: return "connection failed";
+    case FETCH_ERR_TIMEOUT: return "timed out";
+    case FETCH_ERR_CLOSED: return "connection lost";
+    case FETCH_ERR_TLS: return "secure connection failed";
+    case FETCH_ERR_NO_TIME: return "clock not set yet";
+    case FETCH_ERR_REPLY: return "bad response";
     case HTTPC_ERROR_CONNECTION_REFUSED: return "connection failed";
     case HTTPC_ERROR_READ_TIMEOUT: return "timed out";
     case HTTPC_ERROR_CONNECTION_LOST: return "connection lost";

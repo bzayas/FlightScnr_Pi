@@ -31,6 +31,7 @@
 #include "core/platform.h"
 #include "data/model.h"
 #include "hal/config_store.h"
+#include "hal/diag.h"
 #include "hal/display.h"
 #include "net/net.h"
 #include "ui/ui.h"
@@ -133,6 +134,7 @@ void setup() {
   Serial.printf("[boot] last reset: %s, heap %u\n", reset_reason_name(esp_reset_reason()),
                 (unsigned)plat_free_heap());
   pinMode(PIN_BOOT_KEY, INPUT_PULLUP);
+  diag_init();
 
   model_init();
   cmd_init();
@@ -171,6 +173,7 @@ void loop() {
   handle_commands();
   platform_service_save();
   ui_tick();
+  diag_service();
   if (wait > 5) wait = 5;
   delay(wait ? wait : 1);
 }

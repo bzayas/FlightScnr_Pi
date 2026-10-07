@@ -17,7 +17,8 @@ instead of re-inventing them:
   flightscnr/assets/aircraft/icons/*.png   -> src/assets/aircraft_icons.cpp
   flightscnr/assets/data/runways.csv       -> src/assets/airports.cpp
   /usr/share/zoneinfo (TZif footers)       -> installer/js/tz_posix.js
-  certifi (Mozilla CA list) + tools/retired_roots.pem -> src/assets/ca_bundle.cpp
+  certifi (Mozilla CA list) + tools/retired_roots.pem -> src/assets/ca_bundle.cpp,
+                                             src/assets/trust_anchors.c
 
 Usage:  pip install pillow numpy certifi cryptography
         python3 cyd/firmware/tools/gen_assets.py
@@ -392,7 +393,8 @@ RETIRED_ROOTS = {
 }
 
 
-def gen_ca_bundle() -> None:
+def load_roots():
+    """certifi's Mozilla roots plus the pinned retired ones, as (certs, extra)."""
     import hashlib
 
     import certifi
@@ -409,7 +411,14 @@ def gen_ca_bundle() -> None:
             sys.exit(f"retired_roots.pem: unexpected certificate {c.subject.rfc4514_string()} ({fp})")
     have = {c.subject.public_bytes() for c in certs}
     extra = [c for c in retired if c.subject.public_bytes() not in have]
-    certs += extra
+    return certs + extra, extra, certifi.__version__
+
+
+def gen_ca_bundle() -> None:
+    """esp_crt_bundle format, for the mbedtls (WiFiClientSecure) fallback."""
+    from cryptography.hazmat.primitives import serialization
+
+    certs, extra, version = load_roots()
     entries = []
     for c in certs:
         name = c.subject.public_bytes()
@@ -425,16 +434,79 @@ def gen_ca_bundle() -> None:
 #include <stddef.h>
 #include <stdint.h>
 
-// Mozilla root CA list (via certifi) in esp_crt_bundle format, so HTTPS
-// requests (weather key, flight feeds) verify the server certificate.
+// Mozilla root CA list (via certifi) in esp_crt_bundle format, for the
+// mbedtls fallback path (see net/http.cpp). BearSSL uses trust_anchors.c.
 extern const uint8_t CA_BUNDLE[];
 extern const size_t CA_BUNDLE_LEN;
 """
     write(OUT_SRC / "ca_bundle.h", hdr)
-    src = HEADER + (f'\n#include "ca_bundle.h"\n\n// {len(entries)} roots: certifi {certifi.__version__}'
+    src = HEADER + (f'\n#include "ca_bundle.h"\n\n// {len(entries)} roots: certifi {version}'
                     f' plus {len(extra)} from tools/retired_roots.pem\n')
     src += f"const uint8_t CA_BUNDLE[{len(blob)}] = {{\n{c_bytes(blob)}\n}};\n\nconst size_t CA_BUNDLE_LEN = sizeof(CA_BUNDLE);\n"
     write(OUT_SRC / "ca_bundle.cpp", src)
+
+
+# BearSSL curve ids (bearssl_ec.h) for the curves Mozilla roots use.
+BR_CURVES = {"secp256r1": 23, "secp384r1": 24, "secp521r1": 25}
+
+
+def gen_trust_anchors() -> None:
+    """The same roots as BearSSL trust anchors (src/assets/trust_anchors.c).
+    Unlike the ESP32's bundle check, BearSSL stops at the first certificate
+    in the chain whose issuer is a trust anchor, so cross-signed tails are
+    simply ignored."""
+    from cryptography.hazmat.primitives import serialization
+    from cryptography.hazmat.primitives.asymmetric import ec, rsa
+
+    certs, extra, version = load_roots()
+    certs = sorted(certs, key=lambda c: c.subject.public_bytes())
+    body, table, skipped = [], [], 0
+    for i, c in enumerate(certs):
+        dn = c.subject.public_bytes()
+        key = c.public_key()
+        body.append(f"static const unsigned char TA{i}_DN[] = {{\n{c_bytes(dn)}\n}};")
+        dn_ref = f"{{(unsigned char *)TA{i}_DN, sizeof TA{i}_DN}}"
+        if isinstance(key, rsa.RSAPublicKey):
+            nums = key.public_numbers()
+            n = nums.n.to_bytes((nums.n.bit_length() + 7) // 8, "big")
+            e = nums.e.to_bytes((nums.e.bit_length() + 7) // 8, "big")
+            body.append(f"static const unsigned char TA{i}_N[] = {{\n{c_bytes(n)}\n}};")
+            body.append(f"static const unsigned char TA{i}_E[] = {{ {','.join(str(b) for b in e)} }};")
+            table.append(f"  {{{dn_ref}, BR_X509_TA_CA, {{BR_KEYTYPE_RSA, {{.rsa = {{(unsigned char *)TA{i}_N, "
+                         f"sizeof TA{i}_N, (unsigned char *)TA{i}_E, sizeof TA{i}_E}}}}}}}},")
+        elif isinstance(key, ec.EllipticCurvePublicKey) and key.curve.name in BR_CURVES:
+            q = key.public_bytes(serialization.Encoding.X962, serialization.PublicFormat.UncompressedPoint)
+            body.append(f"static const unsigned char TA{i}_Q[] = {{\n{c_bytes(q)}\n}};")
+            table.append(f"  {{{dn_ref}, BR_X509_TA_CA, {{BR_KEYTYPE_EC, {{.ec = {{{BR_CURVES[key.curve.name]}, "
+                         f"(unsigned char *)TA{i}_Q, sizeof TA{i}_Q}}}}}}}},")
+        else:
+            body.pop()
+            skipped += 1
+            print(f"  skipped {c.subject.rfc4514_string()}: unsupported key")
+    hdr = HEADER + """
+#pragma once
+#include <bearssl.h>
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+// Mozilla root CA list (via certifi) plus tools/retired_roots.pem, as BearSSL
+// trust anchors for net/fetch.cpp. In flash; BearSSL only reads them.
+extern const br_x509_trust_anchor FS_TRUST_ANCHORS[];
+extern const size_t FS_TRUST_ANCHORS_NUM;
+
+#ifdef __cplusplus
+}
+#endif
+"""
+    write(OUT_SRC / "trust_anchors.h", hdr)
+    src = HEADER
+    src += (f'\n#include "trust_anchors.h"\n\n// {len(table)} roots: certifi {version}'
+            f' plus {len(extra)} from tools/retired_roots.pem\n\n')
+    src += "\n".join(body) + "\n\nconst br_x509_trust_anchor FS_TRUST_ANCHORS[] = {\n" + "\n".join(table)
+    src += "\n};\n\nconst size_t FS_TRUST_ANCHORS_NUM = sizeof FS_TRUST_ANCHORS / sizeof FS_TRUST_ANCHORS[0];\n"
+    write(OUT_SRC / "trust_anchors.c", src)
 
 
 def main() -> int:
@@ -443,6 +515,7 @@ def main() -> int:
     print("airports");        gen_airports(runways)
     print("time zones");      gen_tz()
     print("ca bundle");       gen_ca_bundle()
+    print("trust anchors");   gen_trust_anchors()
     return 0
 
 

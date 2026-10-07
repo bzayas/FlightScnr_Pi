@@ -56,10 +56,10 @@ static char s_auto_tz[24];
  * face are always present. */
 static bool s_built[PAGE_COUNT] = {true, true, false, false};
 
-/* A page build waits while an HTTPS request holds memory (mem_guard): LVGL
- * crashes if an allocation fails halfway through. The tile stays empty
- * for that moment, then fills in. */
-static const uint32_t PAGE_MIN_FREE = 36 * 1024;
+/* A page build waits while memory is short (mem_guard): LVGL crashes if an
+ * allocation fails halfway through. The tile stays empty for that moment,
+ * then fills in. Both lazy pages are drawn lists now (~1-2 KB each). */
+static const uint32_t PAGE_MIN_FREE = 20 * 1024;
 static uint8_t s_deferred; /* bit per page */
 static lv_timer_t* s_defer_timer;
 
@@ -123,6 +123,26 @@ static void tv_scroll_begin(lv_event_t*) {
   uint8_t cur = nav_current();
   if (cur > 0) page_build(cur - 1);
   if (cur + 1 < PAGE_COUNT) page_build(cur + 1);
+}
+
+/* LVGL's tileview turns the page only when the drag plus a "throw"
+ * predicted from the release speed passes the middle of the screen. A
+ * resistive panel reports almost no speed as the finger lifts, so it took
+ * a nearly full-width swipe. Here, at release (just before LVGL decides),
+ * a deliberate drag of an eighth of the width carries on to the next page,
+ * like a flick does on a phone. */
+static void pager_feedback(lv_indev_drv_t*, uint8_t code) {
+  if (code != LV_EVENT_RELEASED || !s_tv) return;
+  lv_indev_t* indev = lv_indev_get_act();
+  if (!indev) return;
+  auto& p = indev->proc.types.pointer;
+  if (p.scroll_obj != s_tv || p.scroll_dir != LV_DIR_HOR) return;
+  lv_coord_t moved = p.scroll_sum.x; /* finger travel since the drag began; > 0 = rightwards */
+  lv_coord_t need = LV_MAX(24, s_w / 8);
+  if (LV_ABS(moved) < need) return;  /* a nudge: let it settle back */
+  lv_coord_t push = moved > 0 ? s_w / 3 : -s_w / 3;
+  if ((p.scroll_throw_vect.x > 0) != (push > 0) || LV_ABS(p.scroll_throw_vect.x) < LV_ABS(push))
+    p.scroll_throw_vect.x = push; /* SCROLL_ONE keeps it to the next page */
 }
 
 void nav_goto(uint8_t page, bool anim) {
@@ -565,6 +585,8 @@ void ui_init(int width, int height) {
   for (auto t : s_tiles) lv_obj_set_scrollbar_mode(t, LV_SCROLLBAR_MODE_OFF);
   lv_obj_add_event_cb(s_tv, tv_event, LV_EVENT_VALUE_CHANGED, nullptr);
   lv_obj_add_event_cb(s_tv, tv_scroll_begin, LV_EVENT_SCROLL_BEGIN, nullptr);
+  for (lv_indev_t* in = lv_indev_get_next(nullptr); in; in = lv_indev_get_next(in))
+    if (in->driver->type == LV_INDEV_TYPE_POINTER) in->driver->feedback_cb = pager_feedback;
 
   plat_mem_mark("ui shell");
   sky_create(s_tiles[PAGE_SKY]);

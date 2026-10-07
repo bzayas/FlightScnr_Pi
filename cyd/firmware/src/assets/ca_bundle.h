@@ -13,7 +13,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-// Mozilla root CA list (via certifi) in esp_crt_bundle format, so HTTPS
-// requests (weather key, flight feeds) verify the server certificate.
+// Mozilla root CA list (via certifi) in esp_crt_bundle format, for the
+// mbedtls fallback path (see net/http.cpp). BearSSL uses trust_anchors.c.
 extern const uint8_t CA_BUNDLE[];
 extern const size_t CA_BUNDLE_LEN;

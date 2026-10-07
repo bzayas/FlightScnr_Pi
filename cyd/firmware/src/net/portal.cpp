@@ -225,5 +225,5 @@ void portal_init() {
   }
   server.onNotFound(handle_not_found);
   server.begin();
-  xTaskCreatePinnedToCore(portal_task, "portal", 5120, nullptr, 2, nullptr, 0); /* ~1 KB used in device logs */
+  xTaskCreatePinnedToCore(portal_task, "portal", 5120, nullptr, 1, nullptr, 0); /* ~1 KB used in device logs */
 }

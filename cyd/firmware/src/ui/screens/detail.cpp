@@ -302,6 +302,7 @@ void detail_open(uint32_t icao) {
   if (!s_have) return;
   if (s_f.callsign[0]) model_route(s_f.callsign, nullptr); /* kick lookups early */
   model_aircraft(icao, nullptr);
+  plat_mem_mark("sheet");
   s_sheet = sheet_open(nullptr, 90);
   lv_obj_add_event_cb(s_sheet, sheet_deleted, LV_EVENT_DELETE, nullptr);
   lv_obj_t* body = sheet_body(s_sheet);
@@ -328,6 +329,7 @@ void detail_open(uint32_t icao) {
   refresh_buttons();
   radar_select(icao);
   s_last_ms = plat_millis();
+  plat_mem_mark("+sheet");
 }
 
 void detail_tick() {

@@ -23,6 +23,7 @@
 #include "data/geo.h"
 #include "data/model.h"
 #include "data/sun.h"
+#include "hal/diag.h"
 #include "http.h"
 #include "portal.h"
 
@@ -169,10 +170,14 @@ static void mem_report() {
     TaskHandle_t t = xTaskGetHandle(name);
     return t ? (int)uxTaskGetStackHighWaterMark(t) : -1;
   };
-  Serial.printf("[mem] heap %u (lowest %u), largest block %u; spare stack: ui %d, net %d, portal %d\n",
+  uint32_t full, resumed, legacy;
+  http_stats(&full, &resumed, &legacy);
+  Serial.printf("[mem] heap %u (lowest %u), largest block %u; spare stack: ui %d, net %d, portal %d; "
+                "HTTPS: %lu full, %lu resumed, %lu mbedtls\n",
                 (unsigned)heap_caps_get_free_size(MALLOC_CAP_8BIT), (unsigned)plat_min_free_heap(),
                 (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT), spare("loopTask"),
-                (int)uxTaskGetStackHighWaterMark(nullptr), spare("portal"));
+                (int)uxTaskGetStackHighWaterMark(nullptr), spare("portal"), (unsigned long)full,
+                (unsigned long)resumed, (unsigned long)legacy);
 }
 
 static void wifi_service() {
@@ -357,18 +362,14 @@ static int16_t s_feed_told[SRC_COUNT]; /* last failure logged per source */
 static uint32_t s_feed_rest_until[SRC_COUNT]; /* after "429 rate limited" */
 static uint32_t s_feed_rest_ms[SRC_COUNT];    /* that rest; doubles while the 429s continue */
 
-/* Sources that work without HTTPS (adsb.lol, a local receiver) go first:
- * an HTTPS request holds ~65 KB for a few seconds, every poll, on a board
- * with ~80 KB to spare. The configured order holds within each group. */
+/* The configured order. (HTTPS no longer costs heap, so sources that work
+ * over plain HTTP don't need to go first any more.) */
 static int feed_order(uint8_t* out) {
   int n = 0;
-  for (int pass = 0; pass < 2; pass++)
-    for (int i = 0; i < CFG_MAX_SOURCES; i++) {
-      uint8_t s = nc.sources[i];
-      if (s == SRC_NONE || s >= SRC_COUNT) continue;
-      bool plain = s == SRC_ADSBLOL || s == SRC_DUMP1090;
-      if (plain == (pass == 0)) out[n++] = s;
-    }
+  for (int i = 0; i < CFG_MAX_SOURCES; i++) {
+    uint8_t s = nc.sources[i];
+    if (s != SRC_NONE && s < SRC_COUNT) out[n++] = s;
+  }
   return n;
 }
 
@@ -392,13 +393,15 @@ static bool fetch_flights() {
       if (code == 429) { /* the others carry on meanwhile */
         uint32_t& rest = s_feed_rest_ms[src];
         rest = rest ? min(rest * 2, 15u * 60u * 1000u) : 60000u;
+        uint32_t asked = g_http_retry_after_s; /* the server's own Retry-After, when longer */
+        if (asked > rest / 1000 && asked <= 3600) rest = asked * 1000;
         s_feed_rest_until[src] = millis() + rest;
         Serial.printf("[feed] %s: rate limited, resting %lus\n", source_name(src), (unsigned long)(rest / 1000));
       }
       if (src < SRC_COUNT && s_feed_told[src] != code) { /* each new failure once, not every poll */
         s_feed_told[src] = (int16_t)code;
         Serial.printf("[feed] %s: %d %s%s\n", source_name(src), code, http_reason(code),
-                      code == HTTP_ERR_LOW_MEMORY ? " (needs HTTPS, skipped until memory allows)" : "");
+                      code == HTTP_ERR_LOW_MEMORY ? " (skipped until memory allows)" : "");
       }
       continue;
     }
@@ -484,7 +487,8 @@ static void fetch_tracked() {
 /* Routes + aircraft details (adsbdb, free)                                   */
 /* ------------------------------------------------------------------------ */
 
-static void fetch_route(const char* cs) {
+/* Both return false on a transient failure (nothing stored: the UI asks again). */
+static bool fetch_route(const char* cs) {
   char url[96];
   snprintf(url, sizeof(url), "https://api.adsbdb.com/v0/callsign/%s", cs);
   JsonDocument doc;
@@ -497,11 +501,12 @@ static void fetch_route(const char* cs) {
   else if (code == 404 || code == 400)
     r.state = ROUTE_UNKNOWN;
   else
-    return; /* transient: leave it uncached so the UI asks again */
+    return false; /* transient: leave it uncached so the UI asks again */
   model_store_route(r);
+  return true;
 }
 
-static void fetch_aircraft(uint32_t icao) {
+static bool fetch_aircraft(uint32_t icao) {
   char url[80];
   snprintf(url, sizeof(url), "https://api.adsbdb.com/v0/aircraft/%06X", (unsigned)icao);
   JsonDocument doc;
@@ -514,8 +519,9 @@ static void fetch_aircraft(uint32_t icao) {
   else if (code == 404 || code == 400)
     a.state = ROUTE_UNKNOWN;
   else
-    return;
+    return false;
   model_store_aircraft(a);
+  return true;
 }
 
 /* ------------------------------------------------------------------------ */
@@ -567,8 +573,8 @@ static int fetch_tomorrow(WeatherData& w, bool with_forecast) {
   return 200;
 }
 
-static void fetch_weather(bool forecast_due) {
-  if (nc.wx_provider == WX_OFF) return;
+static bool fetch_weather(bool forecast_due) {
+  if (nc.wx_provider == WX_OFF) return true;
   WeatherData w;
   {
     ModelGuard g;
@@ -577,7 +583,7 @@ static void fetch_weather(bool forecast_due) {
   bool use_tomorrow = nc.wx_provider == WX_TOMORROW || (nc.wx_provider == WX_AUTO && nc.key[0]);
   bool ok = false;
   if (use_tomorrow && nc.key[0] && millis() >= s_tomorrow_backoff_until) {
-    int code = fetch_tomorrow(w, forecast_due || w.provider != WX_TOMORROW);
+    int code = fetch_tomorrow(w, forecast_due);
     ok = code == 200;
     if (!ok) {
       ModelGuard g;
@@ -585,13 +591,12 @@ static void fetch_weather(bool forecast_due) {
       if (code == 429) s_tomorrow_backoff_until = millis() + 10u * 60u * 1000u; /* Pi: 10 min backoff */
     }
   }
-  /* Whatever was chosen, fall back to Open-Meteo rather than show nothing:
-   * Tomorrow.io needs HTTPS, which waits for free memory on this board. */
+  /* Whatever was chosen, fall back to Open-Meteo rather than show nothing. */
   if (!ok) ok = fetch_openmeteo(w);
   if (!ok) {
     ModelGuard g;
     Serial.printf("[wx] no weather: %s\n", g_model.wx_err);
-    return;
+    return false;
   }
   Serial.printf("[wx] %s: %.1f C\n", w.provider == WX_TOMORROW ? "Tomorrow.io" : "Open-Meteo", w.temp_c);
   ModelGuard g;
@@ -599,6 +604,7 @@ static void fetch_weather(bool forecast_due) {
   g_model.wx.valid = true;
   g_model.wx_gen++;
   if (w.provider == WX_OPENMETEO || w.provider == WX_TOMORROW) g_model.wx_err[0] = 0;
+  return true;
 }
 
 /* ------------------------------------------------------------------------ */
@@ -657,33 +663,43 @@ static void net_task(void*) {
     uint32_t want = s_refresh;
     s_refresh = 0;
     if (want & NET_REFRESH_FLIGHTS) next_flights = now;
-    if (want & NET_REFRESH_WEATHER) s_wx_next = s_fc_next = now;
-    if (want & NET_REFRESH_QUAKE) next_quake = now;
+    /* A start or a refresh staggers the work: flights, then the current
+     * weather, the forecast 30 s later and earthquakes after 45 s, rather
+     * than everything at once while the screen is being used. */
+    if (want & NET_REFRESH_WEATHER) {
+      s_wx_next = now;
+      s_fc_next = now + 30000;
+    }
+    if (want & NET_REFRESH_QUAKE) next_quake = now + 45000;
 
     if ((int32_t)(now - next_flights) >= 0) {
+      net_phase("flights");
       bool ok = fetch_flights();
       next_flights = millis() + (ok ? nc.poll_s * 1000u : 15000u);
-    } else if ((int32_t)(now - s_wx_next) >= 0) {
+    } else if ((int32_t)(now - s_wx_next) >= 0 || (int32_t)(now - s_fc_next) >= 0) {
       bool fc_due = (int32_t)(now - s_fc_next) >= 0;
-      fetch_weather(fc_due);
-      s_wx_next = millis() + 15u * 60u * 1000u;
-      if (fc_due) s_fc_next = millis() + 60u * 60u * 1000u;
+      net_phase("weather");
+      bool wx_ok = fetch_weather(fc_due);
+      s_wx_next = millis() + (wx_ok ? 15u * 60u : 2u * 60u) * 1000u; /* a failure retries soon */
+      if (fc_due) s_fc_next = wx_ok ? millis() + 60u * 60u * 1000u : s_wx_next; /* not at once */
     } else if ((int32_t)(now - next_meta) >= 0) {
       char cs[9];
       uint32_t icao;
       if (model_next_route_request(cs)) {
-        fetch_route(cs);
-        next_meta = millis() + 1200;
+        net_phase("route");
+        next_meta = millis() + (fetch_route(cs) ? 1200 : 5000); /* a failing server isn't hammered */
       } else if (model_next_aircraft_request(&icao)) {
-        fetch_aircraft(icao);
-        next_meta = millis() + 1200;
+        net_phase("aircraft");
+        next_meta = millis() + (fetch_aircraft(icao) ? 1200 : 5000);
       } else {
         next_meta = millis() + 300;
       }
     } else if (nc.track[0] && (int32_t)(now - next_tracked) >= 0) {
+      net_phase("tracked");
       fetch_tracked();
       next_tracked = millis() + 30000;
     } else if (nc.quake_wanted && plat_time_valid() && (int32_t)(now - next_quake) >= 0) {
+      net_phase("quake");
       fetch_quake();
       next_quake = millis() + 10u * 60u * 1000u;
     } else {
@@ -710,6 +726,8 @@ void net_init() {
   sta_begin();
   portal_init();
   plat_mem_mark("portal");
-  /* A TLS handshake peaked at ~6.2 KB of stack in device logs. */
-  xTaskCreatePinnedToCore(net_task, "net", 10240, nullptr, 3, nullptr, 0);
+  /* Priority 1: just above the idle task, so it never outranks Wi-Fi or
+   * lwIP, and idle gets core 0 whenever a request blocks on the network.
+   * BearSSL's RSA-4096 and P-384 arithmetic keeps its numbers on the stack. */
+  xTaskCreatePinnedToCore(net_task, "net", 12288, nullptr, 1, nullptr, 0);
 }

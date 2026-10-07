@@ -153,6 +153,107 @@ static bool tap_label(const char* text) {
   return true;
 }
 
+/* A resistive-panel swipe: the finger moves `dx` in a few steps, rests,
+ * then lifts, so LVGL sees no speed at release. */
+static void swipe(int x0, int dx, int y) {
+  s_touch = {x0, y, true};
+  run(48);
+  for (int i = 1; i <= 6; i++) {
+    s_touch.x = x0 + dx * i / 6;
+    run(32);
+  }
+  run(96);
+  s_touch.pressed = false;
+  run(800);
+}
+
+/* Short swipes turn the page; a nudge doesn't. Returns the failures. */
+static int check_swipes() {
+  int fails = 0;
+  auto expect = [&](const char* what, uint8_t want) {
+    bool ok = nav_current() == want;
+    printf("  swipe: %-44s %s (page %u)\n", what, ok ? "ok" : "FAIL", nav_current());
+    if (!ok) fails++;
+  };
+  nav_goto(PAGE_FACE, false);
+  run(300);
+  int y = H / 2, step = W / 6;
+  swipe(W * 2 / 3, -W / 20, y);
+  expect("a nudge leaves the face where it is", PAGE_FACE);
+  swipe(W * 2 / 3, -step, y);
+  expect("a short swipe left goes to Traffic", PAGE_TRAFFIC);
+  swipe(W * 2 / 3, -step, y);
+  expect("again, to Settings", PAGE_SETTINGS);
+  swipe(W * 2 / 3, -step, y);
+  expect("Settings is the last page", PAGE_SETTINGS);
+  swipe(W / 3, step, y);
+  expect("a short swipe right comes back to Traffic", PAGE_TRAFFIC);
+  swipe(W / 3, step, y);
+  swipe(W / 3, step, y);
+  expect("and on to Sky", PAGE_SKY);
+  swipe(W / 3, step, y);
+  expect("Sky is the first page", PAGE_SKY);
+  swipe(W * 7 / 8, -W * 3 / 4, y);
+  expect("a long swipe from Sky moves one page only", PAGE_FACE);
+  return fails;
+}
+
+/* Settings is drawn: taps and drags land on the right controls. */
+static int check_settings() {
+  int fails = 0;
+  auto ok = [&](const char* what, bool cond) {
+    printf("  settings: %-46s %s\n", what, cond ? "ok" : "FAIL");
+    if (!cond) fails++;
+  };
+  nav_goto(PAGE_SETTINGS, false);
+  run(400);
+  lv_obj_t* tv = lv_obj_get_child(lv_scr_act(), 0);
+  lv_obj_t* page = lv_obj_get_child(lv_obj_get_child(tv, PAGE_SETTINGS), 0);
+  auto show = [&](const char* title, lv_area_t* a) {
+    lv_obj_scroll_to_y(page, 0, LV_ANIM_OFF);
+    run(50);
+    settings_row_area(title, a);
+    if (a->y2 > H - 30) {
+      lv_obj_scroll_by(page, 0, -(a->y2 - H / 2), LV_ANIM_OFF);
+      run(50);
+      settings_row_area(title, a);
+    }
+  };
+  lv_area_t a;
+  bool h24 = g_cfg.clock24;
+  show("24-hour time", &a);
+  tap_at((a.x1 + a.x2) / 2, (a.y1 + a.y2) / 2);
+  run(300);
+  ok("tap a switch toggles it", g_cfg.clock24 != h24);
+  show("Temperature", &a);
+  tap_at(a.x2 - 8, (a.y1 + a.y2) / 2);
+  run(200);
+  ok("tap the right segment picks \xC2\xB0" "F", g_cfg.u_temp == 1);
+  tap_at(a.x1 + 8, (a.y1 + a.y2) / 2);
+  run(200);
+  ok("tap the left segment picks \xC2\xB0" "C", g_cfg.u_temp == 0);
+  uint8_t labels = g_cfg.labels;
+  show("Labels", &a);
+  tap_at((a.x1 + a.x2) / 2, (a.y1 + a.y2) / 2);
+  run(200);
+  ok("tap a value row cycles it", g_cfg.labels == (labels + 1) % 3);
+  show("Day", &a);
+  int y = (a.y1 + a.y2) / 2;
+  s_touch = {a.x2 - 4, y, true};
+  run(64);
+  for (int x = a.x2 - 4; x >= a.x1 - 12; x -= 6) { /* past the end: it clamps */
+    s_touch.x = x;
+    run(32);
+  }
+  s_touch.pressed = false;
+  run(400);
+  ok("drag the Day slider to its minimum", g_cfg.bright_day == 5);
+  ok("dragging a slider doesn't turn the page", nav_current() == PAGE_SETTINGS);
+  lv_obj_scroll_to_y(page, 0, LV_ANIM_OFF);
+  run(100);
+  return fails;
+}
+
 /* ---- mock data ----------------------------------------------------------- */
 
 struct MockFlight {
@@ -367,6 +468,8 @@ int main(int argc, char** argv) {
   lv_indev_drv_init(&id);
   id.type = LV_INDEV_TYPE_POINTER;
   id.read_cb = touch_cb;
+  id.scroll_limit = 12; /* as on the device (hal/display.cpp) */
+  id.scroll_throw = 8;
   lv_indev_drv_register(&id);
 
   load_mock(g_sim_epoch);
@@ -424,6 +527,21 @@ int main(int argc, char** argv) {
   nav_goto(PAGE_SETTINGS, false);
   run(600);
   shot("10_settings");
+  {
+    lv_obj_t* tv = lv_obj_get_child(lv_scr_act(), 0);
+    lv_obj_t* page = lv_obj_get_child(lv_obj_get_child(tv, PAGE_SETTINGS), 0);
+    lv_obj_scroll_to_y(page, H * 4 / 5, LV_ANIM_OFF);
+    run(200);
+    shot("10b_settings_more");
+    lv_obj_scroll_to_y(page, H * 8 / 5, LV_ANIM_OFF);
+    run(200);
+    shot("10c_settings_units");
+    lv_obj_scroll_to_y(page, LV_COORD_MAX, LV_ANIM_OFF);
+    run(200);
+    shot("10d_settings_end");
+    lv_obj_scroll_to_y(page, 0, LV_ANIM_OFF);
+    run(200);
+  }
   nav_goto(PAGE_FACE, false);
   run(600);
 
@@ -471,10 +589,11 @@ int main(int argc, char** argv) {
   run(800);
   face_editor_close();
   run(600);
+  int swipe_fails = check_swipes() + check_settings();
 
   ui_start_calibration();
   run(800);
   shot("16_calibration");
-  printf("done\n");
-  return 0;
+  printf(swipe_fails ? "done, %d swipe checks FAILED\n" : "done\n", swipe_fails);
+  return swipe_fails ? 1 : 0;
 }

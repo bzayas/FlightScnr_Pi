@@ -19,3 +19,7 @@ firmware/sim/shots/
 installer/firmware/
 installer/flightscnr-cyd-installer*.html
 display-test/
+
+# Vendored BearSSL: its own build config (the root .gitignore ignores config.h)
+!firmware/lib/bearssl/src/config.h
+firmware/test/fetch/build/

@@ -14,6 +14,8 @@
 #include <Arduino.h>
 #include <ArduinoJson.h>
 
+#include "fetch.h"
+
 #define HTTP_ERR_LOW_MEMORY -100
 #define HTTP_ERR_PARSE -101
 
@@ -21,8 +23,8 @@
  * to report a parse failure. */
 typedef bool (*HttpBodyFn)(Stream& body, int content_length, void* ctx);
 
-/* GET `url` (http or https; https is verified against the bundled CA list).
- * Returns the HTTP status, or a negative HTTPClient / HTTP_ERR_* code. */
+/* GET `url` (http or https; https is verified against the bundled roots).
+ * Returns the HTTP status, or a negative FETCH_ERR_* / HTTP_ERR_* code. */
 int http_get(const char* url, HttpBodyFn fn, void* ctx, uint32_t timeout_ms = 12000);
 
 /* GET + deserialize the whole body (optionally filtered) into `doc`. */
@@ -31,3 +33,10 @@ int http_get_json(const char* url, JsonDocument& doc, const JsonDocument* filter
 
 /* Human readable reason for a status / error code. */
 const char* http_reason(int code);
+
+/* Retry-After (seconds) of the last response, 0 when it sent none. */
+extern volatile uint32_t g_http_retry_after_s;
+
+/* HTTPS connections so far: full handshakes, resumed sessions, and requests
+ * that fell back to mbedtls. */
+void http_stats(uint32_t* full, uint32_t* resumed, uint32_t* legacy);

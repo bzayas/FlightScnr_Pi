@@ -79,6 +79,9 @@ jobs:
       - name: Installer and firmware agree on the settings format
         run: make -C sim check
 
+      - name: HTTP/HTTPS client host tests (BearSSL)
+        run: make -C test/fetch -j"$(nproc)" check
+
       - name: Simulator renders every screen
         run: |
           make -C sim -j"$(nproc)"

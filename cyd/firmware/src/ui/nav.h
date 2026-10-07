@@ -36,6 +36,8 @@ void traffic_tick();
 lv_obj_t* settings_create(lv_obj_t* parent);
 void settings_release(); /* page objects are about to be deleted */
 void settings_refresh();
+/* Screen area of a Settings row's control (or the row), for the simulator's tests. */
+bool settings_row_area(const char* title, lv_area_t* out);
 void detail_open(uint32_t icao);
 void detail_tick();
 void detail_close();
