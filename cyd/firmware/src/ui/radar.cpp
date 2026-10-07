@@ -25,6 +25,7 @@
 #include "data/units.h"
 #include "fx.h"
 #include "theme.h"
+#include "widgets.h"
 
 /* ------------------------------------------------------------------------ */
 /* Constants (scaled from the Pi's 390-unit dial: theme.py)                  */
@@ -775,6 +776,7 @@ static void draw_runways(Fx& f, lv_draw_ctx_t* dc, float acx, float acy) {
 
 static void draw_tracks(Fx& f, lv_draw_ctx_t* dc, float acx, float acy, uint32_t now) {
   const Palette& p = pal();
+  const float isc = ui_compact() ? 0.8f : 1.0f; /* 2.8" radar: smaller icons */
   /* draw low traffic first so high-altitude jets sit on top */
   Track* order[MAX_TRACKS];
   int n = 0;
@@ -794,6 +796,7 @@ static void draw_tracks(Fx& f, lv_draw_ctx_t* dc, float acx, float acy, uint32_t
     float x = acx + t.px + t.ex, y = acy + t.py + t.ey;
     if (!fx_intersects(f, x - 36, y - 36, x + 36 + t.tag_w, y + 36)) continue;
     const AircraftIconMask& m = AIRCRAFT_ICONS[t.f.icon < ICON_COUNT ? t.f.icon : 0];
+    const float side = m.side * isc; /* drawn icon size */
     lv_color_t c = track_color(t, now);
     uint8_t opa = (uint8_t)(255 * t.alpha * (t.rim ? 0.75f : 1.0f) * s_dim / 255);
 
@@ -802,18 +805,18 @@ static void draw_tracks(Fx& f, lv_draw_ctx_t* dc, float acx, float acy, uint32_t
       fx_glow(f, x, y, 17.0f, c, (uint8_t)(opa * (0.25f + 0.25f * pulse)));
     }
     if (t.ping > 0) {
-      float pr = m.side * 0.5f + 3 + (1.0f - t.ping) * 11.0f;
+      float pr = side * 0.5f + 3 + (1.0f - t.ping) * 11.0f;
       fx_ring(f, x, y, pr, 0.9f, c, (uint8_t)(opa * t.ping * 0.6f));
     }
     if (t.f.icao == s_selected) {
       float pulse = 0.5f + 0.5f * sinf(now * 0.008f);
-      fx_ring(f, x, y, m.side * 0.62f + 4 + pulse * 2, 1.2f, p.accent, opa);
+      fx_ring(f, x, y, side * 0.62f + 4 + pulse * 2, 1.2f, p.accent, opa);
     }
-    fx_mask(f, m.alpha, m.side, x, y, t.hdg, 1.0f, c, opa);
+    fx_mask(f, m.alpha, m.side, x, y, t.hdg, isc, c, opa);
     if (aircraft_is_helicopter_icon(t.f.icon)) { /* spinning two-blade rotor */
-      float rr = m.side * 0.41f;
+      float rr = side * 0.41f;
       float hx, hy;
-      fx_polar(x, y, m.side * 0.14f, t.hdg, &hx, &hy);
+      fx_polar(x, y, side * 0.14f, t.hdg, &hx, &hy);
       float ang = fmodf(now * 0.576f, 180.0f);
       fx_disc(f, hx, hy, rr, c, (uint8_t)(opa * 0.16f));
       float ax, ay, bx, by;

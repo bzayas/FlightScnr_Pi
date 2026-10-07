@@ -189,7 +189,7 @@ export class Device {
     if (family !== 'ESP32' && !/^ESP32-D0/.test(this.chip)) {
       const chip = this.chip;
       await this.disconnect();
-      throw new Error(`This build is for the classic ESP32 (CYD ESP32-32E). Found ${chip}.`);
+      throw new Error(`This build is for the classic ESP32 that Cheap Yellow Displays use. Found ${chip}.`);
     }
     return { chip: this.chip, mac: this.mac };
   }

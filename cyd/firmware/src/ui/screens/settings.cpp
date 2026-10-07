@@ -290,7 +290,7 @@ lv_obj_t* settings_create(lv_obj_t* parent) {
   for (int i = 0; i < ACCENT_PRESET_COUNT; i++) {
     lv_obj_t* d = lv_obj_create(r);
     lv_obj_remove_style_all(d);
-    lv_obj_set_size(d, 22, 22);
+    lv_obj_set_size(d, ui_compact() ? 18 : 22, ui_compact() ? 18 : 22);
     lv_obj_set_style_radius(d, LV_RADIUS_CIRCLE, 0);
     lv_obj_set_style_bg_opa(d, LV_OPA_COVER, 0);
     const uint8_t* c = ACCENT_PRESETS[i].rgb;

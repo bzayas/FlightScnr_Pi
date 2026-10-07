@@ -70,11 +70,22 @@ static void t(lv_draw_ctx_t* dc, const char* s, const lv_font_t* f, lv_color_t c
   lv_draw_label(dc, &d, &a, s, nullptr);
 }
 
+/* Sheet metrics: the 2.8" screen gets a tighter set. */
+struct Metrics {
+  int head_h, id_dy, sub_dy, glyph_dx, glyph_dy;
+  float glyph_scale;
+  const lv_font_t *id_font, *iata_font, *val_font;
+  int route_h, route_gap, city_dy, bar_dy, row_h, val_dy, sub2_dy;
+};
+static const Metrics M_REG = {72, 12, 48, 66, 32, 0.95f, &fs_text_30, &fs_text_24, &fs_text_20, 74, 12, 38, 60, 58, 14, 38};
+static const Metrics M_CMP = {58, 12, 40, 62, 26, 0.7f, &fs_text_24, &fs_text_20, &fs_text_16, 60, 8, 30, 48, 50, 13, 31};
+static const Metrics& m() { return ui_compact() ? M_CMP : M_REG; }
+
 static void cell(lv_draw_ctx_t* dc, int x, int y, const char* cap, const char* val, const char* sub, lv_color_t vc) {
   const Palette& p = pal();
   t(dc, cap, &fs_text_12, p.text2, x, y, LV_TEXT_ALIGN_LEFT);
-  t(dc, val, &fs_text_20, vc, x, y + 14, LV_TEXT_ALIGN_LEFT);
-  t(dc, sub, &fs_text_12, p.text2, x, y + 38, LV_TEXT_ALIGN_LEFT);
+  t(dc, val, m().val_font, vc, x, y + m().val_dy, LV_TEXT_ALIGN_LEFT);
+  t(dc, sub, &fs_text_12, p.text2, x, y + m().sub2_dy, LV_TEXT_ALIGN_LEFT);
 }
 
 static void body_draw(lv_event_t* e) {
@@ -102,16 +113,20 @@ static void body_draw(lv_event_t* e) {
   snprintf(airline, sizeof(airline), "%s", rs == ROUTE_OK && r.airline[0] ? r.airline : "");
   for (char* c = airline; *c; c++) *c = (char)toupper((unsigned char)*c);
   t(dc, airline, &fs_text_12, p.text2, x, y, LV_TEXT_ALIGN_LEFT);
-  t(dc, id, &fs_text_30, p.text, x, y + 12, LV_TEXT_ALIGN_LEFT);
+  const Metrics& mm = m();
+  const bool cp = ui_compact();
+  t(dc, id, mm.id_font, p.text, x, y + mm.id_dy, LV_TEXT_ALIGN_LEFT);
   char sub[80];
   const char* tn = as == ROUTE_OK && ai.type_name[0] ? ai.type_name : fl.type;
   const char* mf = as == ROUTE_OK ? ai.manufacturer : "";
   snprintf(sub, sizeof(sub), "%s%s%s%s%s", mf, mf[0] ? " " : "", tn, fl.reg[0] ? " \xC2\xB7 " : "", fl.reg);
-  t(dc, sub, &fs_text_14, p.text2, x, y + 48, LV_TEXT_ALIGN_LEFT);
+  t(dc, sub, cp ? &fs_text_12 : &fs_text_14, p.text2, x, y + mm.sub_dy, LV_TEXT_ALIGN_LEFT);
   lv_color_t pc = (fl.flags & (FF_EMERGENCY | FF_MILITARY)) ? p.alert_mil : p.plane;
-  fx_glow(f, a.x2 - 66, y + 32, 30, pc, 60); /* clear of the floating close button */
-  fx_mask(f, PLANE_GLYPH_56, 56, a.x2 - 66, y + 32, isnan(fl.track) ? 0 : fl.track, 0.95f, pc, 255);
-  y += 72;
+  /* clear of the floating close button */
+  fx_glow(f, a.x2 - mm.glyph_dx, y + mm.glyph_dy, 30 * mm.glyph_scale, pc, 60);
+  fx_mask(f, PLANE_GLYPH_56, 56, a.x2 - mm.glyph_dx, y + mm.glyph_dy, isnan(fl.track) ? 0 : fl.track, mm.glyph_scale,
+          pc, 255);
+  y += mm.head_h;
 
   if (fl.flags & FF_EMERGENCY) {
     lv_area_t b = {(lv_coord_t)x, (lv_coord_t)y, (lv_coord_t)(a.x2), (lv_coord_t)(y + 26)};
@@ -125,30 +140,30 @@ static void body_draw(lv_event_t* e) {
                                                     : "Unlawful interference";
     char msg[64];
     snprintf(msg, sizeof(msg), "SQUAWK %s \xC2\xB7 %s", fl.squawk, what);
-    t(dc, msg, &fs_text_14, lv_color_white(), x + w / 2, y + 5, LV_TEXT_ALIGN_CENTER);
+    t(dc, msg, cp ? &fs_text_12 : &fs_text_14, lv_color_white(), x + w / 2, y + 5, LV_TEXT_ALIGN_CENTER);
     y += 34;
   }
 
   /* route */
   {
-    lv_area_t rc = {(lv_coord_t)x, (lv_coord_t)y, (lv_coord_t)a.x2, (lv_coord_t)(y + 74)};
+    lv_area_t rc = {(lv_coord_t)x, (lv_coord_t)y, (lv_coord_t)a.x2, (lv_coord_t)(y + mm.route_h)};
     lv_draw_rect_dsc_t rd;
     lv_draw_rect_dsc_init(&rd);
     rd.bg_color = p.bg;
     rd.radius = 14;
     lv_draw_rect(dc, &rd, &rc);
     if (rs == ROUTE_OK && r.orig_iata[0]) {
-      t(dc, r.orig_iata, &fs_text_24, p.text, x + 14, y + 8, LV_TEXT_ALIGN_LEFT);
-      t(dc, r.dest_iata, &fs_text_24, p.text, a.x2 - 14, y + 8, LV_TEXT_ALIGN_RIGHT);
-      t(dc, r.orig_city, &fs_text_12, p.text2, x + 14, y + 38, LV_TEXT_ALIGN_LEFT);
-      t(dc, r.dest_city, &fs_text_12, p.text2, a.x2 - 14, y + 38, LV_TEXT_ALIGN_RIGHT);
+      t(dc, r.orig_iata, mm.iata_font, p.text, x + 14, y + 8, LV_TEXT_ALIGN_LEFT);
+      t(dc, r.dest_iata, mm.iata_font, p.text, a.x2 - 14, y + 8, LV_TEXT_ALIGN_RIGHT);
+      t(dc, r.orig_city, &fs_text_12, p.text2, x + 14, y + mm.city_dy, LV_TEXT_ALIGN_LEFT);
+      t(dc, r.dest_city, &fs_text_12, p.text2, a.x2 - 14, y + mm.city_dy, LV_TEXT_ALIGN_RIGHT);
       float prog = 0.5f;
       if (!isnan(r.olat) && !isnan(r.dlat)) {
         double tot = geo_dist_nm(r.olat, r.olon, r.dlat, r.dlon);
         double done = geo_dist_nm(r.olat, r.olon, fl.lat, fl.lon);
         if (tot > 1) prog = (float)fmin(1.0, fmax(0.0, done / tot));
       }
-      float bx0 = x + 14, bx1 = a.x2 - 14, by = y + 60;
+      float bx0 = x + 14, bx1 = a.x2 - 14, by = y + mm.bar_dy;
       fx_capsule(f, bx0, by, bx1, by, 1.6f, p.sep, 255);
       fx_capsule(f, bx0, by, bx0 + (bx1 - bx0) * prog, by, 1.6f, p.blue, 255);
       fx_disc(f, bx0, by, 3.5f, p.blue, 255);
@@ -156,9 +171,9 @@ static void body_draw(lv_event_t* e) {
       fx_mask(f, PLANE_GLYPH_56, 56, bx0 + (bx1 - bx0) * prog, by, 90, 0.36f, p.blue, 255);
     } else {
       t(dc, rs == ROUTE_PENDING ? "Looking up route\xE2\x80\xA6" : "Route not available", &fs_text_16, p.text2,
-        x + w / 2, y + 26, LV_TEXT_ALIGN_CENTER);
+        x + w / 2, y + mm.route_h / 2 - 10, LV_TEXT_ALIGN_CENTER);
     }
-    y += 86;
+    y += mm.route_h + mm.route_gap;
   }
 
   /* stats grid: 2 columns in portrait, 3 in landscape. Cells fill row-major. */
@@ -166,7 +181,7 @@ static void body_draw(lv_event_t* e) {
   const int cw = w / cols;
   int ci = 0;
   auto cx = [&](int i) { return x + (i % cols) * cw; };
-  auto cy = [&](int i) { return y + (i / cols) * 58; };
+  auto cy = [&](int i) { return y + (i / cols) * mm.row_h; };
   char v[32], s2[48];
   fmt_alt(fl.alt_ft, v, sizeof(v));
   if (fl.flags & FF_GROUND) snprintf(v, sizeof(v), "On ground");
@@ -174,7 +189,7 @@ static void body_draw(lv_event_t* e) {
   cell(dc, cx(ci), cy(ci), "ALTITUDE", v, abs(fl.vs_fpm) > 64 ? s2 : "Level", p.text);
   ci++;
   fmt_speed(fl.gs_kt, v, sizeof(v));
-  snprintf(s2, sizeof(s2), "%d kt ground speed", (int)lroundf(fl.gs_kt));
+  snprintf(s2, sizeof(s2), cp ? "%d kt ground" : "%d kt ground speed", (int)lroundf(fl.gs_kt));
   cell(dc, cx(ci), cy(ci), "SPEED", v, s2, p.text);
   ci++;
   if (!isnan(fl.track))
@@ -183,17 +198,19 @@ static void body_draw(lv_event_t* e) {
     snprintf(v, sizeof(v), "\xE2\x80\x94");
   cell(dc, cx(ci), cy(ci), "HEADING", v, "", p.text);
   if (!isnan(fl.track)) {
-    float ccx = cx(ci) + cw - 26, ccy = cy(ci) + 26;
-    fx_ring(f, ccx, ccy, 16, 0.8f, p.text3, 255);
+    const float rr = cp ? 12.0f : 16.0f;
+    float ccx = cx(ci) + cw - rr - (cp ? 6 : 10), ccy = cy(ci) + (cp ? 22 : 26);
+    fx_ring(f, ccx, ccy, rr, 0.8f, p.text3, 255);
     float hx, hy, tx2, ty2;
-    fx_polar(ccx, ccy, 13, fl.track, &hx, &hy);
-    fx_polar(ccx, ccy, 13, fl.track + 180, &tx2, &ty2);
+    fx_polar(ccx, ccy, rr - 3, fl.track, &hx, &hy);
+    fx_polar(ccx, ccy, rr - 3, fl.track + 180, &tx2, &ty2);
     fx_capsule(f, tx2, ty2, hx, hy, 1.0f, p.text2, 255);
     fx_disc(f, hx, hy, 2.8f, p.orange, 255);
   }
   double dn = geo_dist_nm(g_cfg.lat, g_cfg.lon, fl.lat, fl.lon);
   fmt_dist((float)dn, v, sizeof(v));
-  snprintf(s2, sizeof(s2), "bearing %s from you", geo_compass8(geo_bearing(g_cfg.lat, g_cfg.lon, fl.lat, fl.lon)));
+  snprintf(s2, sizeof(s2), cp ? "%s of you" : "bearing %s from you",
+           geo_compass8(geo_bearing(g_cfg.lat, g_cfg.lon, fl.lat, fl.lon)));
   ci++;
   cell(dc, cx(ci), cy(ci), "DISTANCE", v, s2, p.text);
   ci++;
@@ -208,10 +225,11 @@ static void body_draw(lv_event_t* e) {
        s_lost ? p.orange : p.text);
 }
 
-/* Header 72 + route 86 + stat rows, plus the squawk banner only when needed. */
+/* Header + route + stat rows, plus the squawk banner only when needed. */
 static int body_height(bool emergency) {
   bool land = lv_disp_get_hor_res(nullptr) > 400;
-  return 72 + 86 + (land ? 2 : 3) * 58 + (emergency ? 34 : 0);
+  const Metrics& mm = m();
+  return mm.head_h + mm.route_h + mm.route_gap + (land ? 2 : 3) * mm.row_h + (emergency ? 34 : 0);
 }
 
 static void refresh_buttons() {
@@ -292,9 +310,9 @@ void detail_open(uint32_t icao) {
 
   lv_obj_t* row = lv_obj_create(body);
   lv_obj_remove_style_all(row);
-  lv_obj_set_size(row, LV_PCT(100), 44);
+  lv_obj_set_size(row, LV_PCT(100), ui_compact() ? 38 : 44);
   lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
-  lv_obj_set_style_pad_column(row, 10, 0);
+  lv_obj_set_style_pad_column(row, ui_compact() ? 8 : 10, 0);
   lv_obj_clear_flag(row, LV_OBJ_FLAG_SCROLLABLE);
   s_track_btn = w_button(row, SYM_CROSSHAIR " Track", false);
   lv_obj_set_flex_grow(s_track_btn, 1);

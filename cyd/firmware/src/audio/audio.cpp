@@ -244,8 +244,10 @@ static void speaker_begin() {
   }
   i2s_set_dac_mode(I2S_DAC_CHANNEL_LEFT_EN); /* DAC2 = GPIO26 */
   i2s_zero_dma_buffer(I2S_NUM_0);
-  pinMode(PIN_AUDIO_EN, OUTPUT);
-  digitalWrite(PIN_AUDIO_EN, HIGH); /* amplifier off until needed */
+  if (board().audio_en >= 0) {
+    pinMode(board().audio_en, OUTPUT);
+    digitalWrite(board().audio_en, HIGH); /* amplifier off until needed */
+  }
   s_i2s_ready = true;
 }
 
@@ -253,7 +255,7 @@ static void speaker_amp(bool on) {
   if (on == s_amp_on) return;
   s_amp_on = on;
   if (!on && s_i2s_ready) i2s_zero_dma_buffer(I2S_NUM_0);
-  digitalWrite(PIN_AUDIO_EN, on ? LOW : HIGH);
+  if (board().audio_en >= 0) digitalWrite(board().audio_en, on ? LOW : HIGH);
 }
 
 /* Give the driver's DMA buffers back while nothing plays. */

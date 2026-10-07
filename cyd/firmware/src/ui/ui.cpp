@@ -23,6 +23,7 @@
 #include "data/alerts.h"
 #include "data/model.h"
 #include "face.h"
+#include "layouts.h"
 #include "nav.h"
 #include "radar.h"
 #include "theme.h"
@@ -335,9 +336,10 @@ static void show_notice(const Notice& n) {
   lv_obj_t* b = lv_obj_create(lv_layer_top());
   lv_obj_remove_style_all(b);
   lv_obj_add_style(b, &ST_CARD, 0);
-  lv_obj_set_style_radius(b, 18, 0);
-  lv_obj_set_style_pad_all(b, 10, 0);
-  lv_obj_set_style_pad_column(b, 10, 0);
+  const bool cp = ui_compact();
+  lv_obj_set_style_radius(b, cp ? 14 : 18, 0);
+  lv_obj_set_style_pad_all(b, cp ? 8 : 10, 0);
+  lv_obj_set_style_pad_column(b, cp ? 8 : 10, 0);
   lv_obj_set_style_border_color(b, col, 0);
   lv_obj_set_style_border_width(b, 2, 0);
   lv_obj_set_size(b, s_w - 16, LV_SIZE_CONTENT);
@@ -349,12 +351,12 @@ static void show_notice(const Notice& n) {
   lv_obj_add_event_cb(b, banner_click, LV_EVENT_CLICKED, (void*)(uintptr_t)n.icao);
   lv_obj_t* ic = lv_obj_create(b);
   lv_obj_remove_style_all(ic);
-  lv_obj_set_size(ic, 34, 34);
-  lv_obj_set_style_radius(ic, 9, 0);
+  lv_obj_set_size(ic, cp ? 28 : 34, cp ? 28 : 34);
+  lv_obj_set_style_radius(ic, cp ? 8 : 9, 0);
   lv_obj_set_style_bg_opa(ic, LV_OPA_COVER, 0);
   lv_obj_set_style_bg_color(ic, col, 0);
   lv_obj_clear_flag(ic, LV_OBJ_FLAG_CLICKABLE);
-  lv_obj_t* il = w_label(ic, sym, &fs_icons_18, nullptr);
+  lv_obj_t* il = w_label(ic, sym, cp ? &fs_icons_14 : &fs_icons_18, nullptr);
   lv_obj_set_style_text_color(il, lv_color_white(), 0);
   lv_obj_center(il);
   lv_obj_t* col_box = lv_obj_create(b);
@@ -363,8 +365,8 @@ static void show_notice(const Notice& n) {
   lv_obj_set_height(col_box, LV_SIZE_CONTENT);
   lv_obj_set_flex_flow(col_box, LV_FLEX_FLOW_COLUMN);
   lv_obj_clear_flag(col_box, LV_OBJ_FLAG_CLICKABLE);
-  w_label(col_box, n.title, &fs_text_16, &ST_TEXT);
-  lv_obj_t* body = w_label(col_box, n.body, &fs_text_14, &ST_TEXT2);
+  w_label(col_box, n.title, cp ? &fs_text_14 : &fs_text_16, &ST_TEXT);
+  lv_obj_t* body = w_label(col_box, n.body, cp ? &fs_text_12 : &fs_text_14, &ST_TEXT2);
   lv_label_set_long_mode(body, LV_LABEL_LONG_DOT);
   lv_obj_set_width(body, LV_PCT(100));
   lv_anim_t a;
@@ -446,27 +448,49 @@ void setup_card_update() {
     return;
   }
   if (!s_setup) {
+    const bool cp = ui_compact();
+    const bool side = s_h < 260; /* 320x240: QR code beside the text */
     s_setup = lv_obj_create(lv_layer_top());
     lv_obj_remove_style_all(s_setup);
     lv_obj_add_style(s_setup, &ST_CARD, 0);
-    lv_obj_set_style_radius(s_setup, 22, 0);
-    lv_obj_set_style_pad_all(s_setup, 16, 0);
-    lv_obj_set_style_pad_row(s_setup, 10, 0);
-    lv_obj_set_size(s_setup, LV_MIN(s_w - 24, 300), LV_SIZE_CONTENT);
-    lv_obj_set_flex_flow(s_setup, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_style_radius(s_setup, cp ? 16 : 22, 0);
+    lv_obj_set_style_pad_all(s_setup, cp ? 10 : 16, 0);
+    lv_obj_set_style_pad_row(s_setup, cp ? 6 : 10, 0);
+    lv_obj_set_style_pad_column(s_setup, 12, 0);
+    lv_obj_set_size(s_setup, side ? s_w - 24 : LV_MIN(s_w - 24, 300), LV_SIZE_CONTENT);
+    lv_obj_set_flex_flow(s_setup, side ? LV_FLEX_FLOW_ROW : LV_FLEX_FLOW_COLUMN);
     lv_obj_set_flex_align(s_setup, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
     lv_obj_clear_flag(s_setup, LV_OBJ_FLAG_SCROLLABLE);
-    w_label(s_setup, SYM_WIFI "  Connect to Wi-Fi", &fs_text_20, &ST_TEXT);
+    lv_obj_t* text_col = s_setup;
     char qr[96];
     snprintf(qr, sizeof(qr), "WIFI:T:WPA;S:%s;P:%s;;", ns.ap_ssid, ns.ap_pass);
-    lv_obj_t* code = lv_qrcode_create(s_setup, 120, pal().text, pal().platter);
-    lv_qrcode_update(code, qr, strlen(qr));
+    if (side) {
+      lv_obj_t* code = lv_qrcode_create(s_setup, 96, pal().text, pal().platter);
+      lv_qrcode_update(code, qr, strlen(qr));
+      text_col = lv_obj_create(s_setup);
+      lv_obj_remove_style_all(text_col);
+      lv_obj_set_flex_grow(text_col, 1);
+      lv_obj_set_height(text_col, LV_SIZE_CONTENT);
+      lv_obj_set_flex_flow(text_col, LV_FLEX_FLOW_COLUMN);
+      lv_obj_set_flex_align(text_col, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+      lv_obj_set_style_pad_row(text_col, 6, 0);
+      lv_obj_clear_flag(text_col, LV_OBJ_FLAG_SCROLLABLE);
+    }
+    w_label(text_col, SYM_WIFI "  Connect to Wi-Fi", side ? &fs_text_14 : (cp ? &fs_text_16 : &fs_text_20), &ST_TEXT);
+    if (!side) {
+      lv_obj_t* code = lv_qrcode_create(s_setup, cp ? 96 : 120, pal().text, pal().platter);
+      lv_qrcode_update(code, qr, strlen(qr));
+    }
     char txt[200];
     snprintf(txt, sizeof(txt), "Scan, or join \"%s\"\npassword %s\nthen open http://192.168.4.1\n(or use the web installer)",
              ns.ap_ssid, ns.ap_pass);
-    lv_obj_t* l = w_label(s_setup, txt, &fs_text_14, &ST_TEXT2);
+    lv_obj_t* l = w_label(text_col, txt, cp ? &fs_text_12 : &fs_text_14, &ST_TEXT2);
     lv_obj_set_style_text_align(l, LV_TEXT_ALIGN_CENTER, 0);
-    lv_obj_t* later = w_button(s_setup, "Later", false);
+    if (side) {
+      lv_obj_set_width(l, LV_PCT(100));
+      lv_label_set_long_mode(l, LV_LABEL_LONG_WRAP);
+    }
+    lv_obj_t* later = w_button(text_col, "Later", false);
     lv_obj_add_event_cb(later, setup_later, LV_EVENT_CLICKED, nullptr);
     lv_obj_center(s_setup);
   }
@@ -487,6 +511,7 @@ static void show_main() {
 void ui_init(int width, int height) {
   s_w = width;
   s_h = height;
+  layouts_set_compact(ui_compact());
   theme_init();
   widgets_init();
   comp_refresh_context();

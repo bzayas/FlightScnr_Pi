@@ -1024,7 +1024,7 @@ static void render_rect(Fx& f, lv_draw_ctx_t* dc, Slot* s, const CompData& d, co
   if (has_chart) {
     int cx0 = a.x1 + w * 45 / 100 + 4, cw = a.x2 - pad - cx0;
     int cy0 = a.y1 + 6, ch = h - 12;
-    if (d.custom == CUSTOM_SOLAR) draw_solar_curve(f, dc, cx0, cy0, cw, ch, true);
+    if (d.custom == CUSTOM_SOLAR) draw_solar_curve(f, dc, cx0, cy0, cw, ch, h >= 56); /* labels need room */
     if (d.custom == CUSTOM_HOURLY) draw_hourly(f, dc, cx0, cy0, cw, ch);
     if (d.custom == CUSTOM_ALT_BANDS) draw_alt_bands(f, cx0, cy0 + 6, cw, ch - 10);
     if (d.custom == CUSTOM_LEVEL) {

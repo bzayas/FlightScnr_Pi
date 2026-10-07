@@ -79,10 +79,10 @@ class InstallerUI extends SettingsUI {
         h('p', {}, h('b', {}, 'This browser can’t talk to USB devices.'), ' Installing needs Chrome, Edge or Opera on a Windows, macOS, Linux or ChromeOS computer (Web Serial).'),
         h('p', {}, 'You can still fill in your settings here and save them to a file, then load that file on a supported computer.')))),
       this.group('What you need', [
-        this.row(h('b', {}, '4.0″ ESP32-32E display (E32R40T)'), '320×480 ST7796S touch screen. The 2.8″ and 3.5″ CYDs use different hardware and won’t work with this build.', tile('display', 'var(--yellow)'), { cls: 'has-icon' }),
-        this.row(h('b', {}, 'A USB-C data cable'), 'Charge-only cables are the #1 reason a board isn’t found.', tile('install', 'var(--green)'), { cls: 'has-icon' }),
+        this.row(h('b', {}, 'A Cheap Yellow Display'), 'The 2.8″ ESP32-2432S028R (micro-USB or USB-C) or the 4.0″ ESP32-32E (E32R40T). FlightScnr recognises which one you have. 3.5″ boards aren’t supported yet.', tile('display', 'var(--yellow)'), { cls: 'has-icon' }),
+        this.row(h('b', {}, 'A USB data cable'), 'Charge-only cables are the #1 reason a board isn’t found.', tile('install', 'var(--green)'), { cls: 'has-icon' }),
         this.row(h('b', {}, 'Chrome or Edge on a computer'), 'Phones and Safari/Firefox can’t flash over USB.', tile('start', 'var(--blue)'), { cls: 'has-icon' }),
-        this.row(h('b', {}, 'Optional: a speaker'), 'A small 8 Ω speaker on the P4 connector, or any Bluetooth speaker.', tile('speaker', 'var(--pink)'), { cls: 'has-icon' }),
+        this.row(h('b', {}, 'Optional: a speaker'), 'A small 8 Ω speaker on the board’s speaker connector, or any Bluetooth speaker.', tile('speaker', 'var(--pink)'), { cls: 'has-icon' }),
       ]),
       this.group('How it works', [h('div', { class: 'row stack' }, h('ol', { class: 'steps' },
         h('li', {}, h('b', {}, 'Fill in your settings'), ': Wi-Fi, location, and an optional weather key. Each page explains what’s needed.'),

@@ -33,6 +33,14 @@
 
 #include "core/board.h"
 
+/* Covers both screen sizes: panels ignore pixels outside their own area. */
+#define FILL_W 320
+#define FILL_H 480
+/* RGB LED, common anode: E32R40T 22/16/17, 2.8" CYD 4/16/17. */
+static const int LED_R[] = {22, 4};
+#define LED_G 16
+#define LED_B 17
+
 static const char* reset_reason() {
   switch (esp_reset_reason()) {
     case ESP_RST_POWERON: return "power on";
@@ -48,9 +56,9 @@ static const char* reset_reason() {
 }
 
 static void led(bool r, bool g, bool b) { /* common anode: LOW = on */
-  digitalWrite(PIN_LED_R, r ? LOW : HIGH);
-  digitalWrite(PIN_LED_G, g ? LOW : HIGH);
-  digitalWrite(PIN_LED_B, b ? LOW : HIGH);
+  for (int pin : LED_R) digitalWrite(pin, r ? LOW : HIGH);
+  digitalWrite(LED_G, g ? LOW : HIGH);
+  digitalWrite(LED_B, b ? LOW : HIGH);
 }
 
 /* ---- A. backlight candidates ------------------------------------------- */
@@ -163,12 +171,12 @@ static void begin_wiring(const Wiring& w) {
 }
 
 static void fill(uint8_t r, uint8_t g, uint8_t b) {
-  const uint8_t caset[] = {0, 0, (LCD_NATIVE_W - 1) >> 8, (LCD_NATIVE_W - 1) & 0xFF};
-  const uint8_t raset[] = {0, 0, (LCD_NATIVE_H - 1) >> 8, (LCD_NATIVE_H - 1) & 0xFF};
+  const uint8_t caset[] = {0, 0, (FILL_W - 1) >> 8, (FILL_W - 1) & 0xFF};
+  const uint8_t raset[] = {0, 0, (FILL_H - 1) >> 8, (FILL_H - 1) & 0xFF};
   cmd(0x2A, caset, 4);
   cmd(0x2B, raset, 4);
-  static uint8_t line[LCD_NATIVE_W * 3];
-  for (int i = 0; i < LCD_NATIVE_W; i++) {
+  static uint8_t line[FILL_W * 3];
+  for (int i = 0; i < FILL_W; i++) {
     line[3 * i] = r;
     line[3 * i + 1] = g;
     line[3 * i + 2] = b;
@@ -178,7 +186,7 @@ static void fill(uint8_t r, uint8_t g, uint8_t b) {
   digitalWrite(W->dc, LOW);
   spi.transfer(0x2C);
   digitalWrite(W->dc, HIGH);
-  for (int y = 0; y < LCD_NATIVE_H; y++) spi.writeBytes(line, sizeof(line));
+  for (int y = 0; y < FILL_H; y++) spi.writeBytes(line, sizeof(line));
   digitalWrite(W->cs, HIGH);
   spi.endTransaction();
 }
@@ -217,10 +225,10 @@ void setup() {
                 (unsigned)ESP.getCpuFreqMHz(), (unsigned)(ESP.getFlashChipSize() / 1024));
   Serial.println("[test] WATCH THE SCREEN AND THE BACK OF THE BOARD. Note the step number when anything happens.");
 
-  for (int pin : {PIN_LED_R, PIN_LED_G, PIN_LED_B}) pinMode(pin, OUTPUT);
-  pinMode(PIN_AUDIO_EN, OUTPUT);
-  digitalWrite(PIN_AUDIO_EN, HIGH); /* E32R40T amplifier off */
-  Serial.println("[test] step 0: RGB LED on the back goes red, green, blue now (E32R40T: IO22/16/17)");
+  for (int pin : LED_R) pinMode(pin, OUTPUT);
+  pinMode(LED_G, OUTPUT);
+  pinMode(LED_B, OUTPUT);
+  Serial.println("[test] step 0: RGB LED on the back goes red, green, blue now");
   for (int k = 0; k < 2; k++) {
     led(1, 0, 0);
     delay(500);

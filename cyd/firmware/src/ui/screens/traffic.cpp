@@ -45,18 +45,31 @@ static int s_n;
 static uint32_t s_gen, s_theme;
 static lv_obj_t* s_empty;
 
-static void t(lv_draw_ctx_t* dc, const char* s, const lv_font_t* f, lv_color_t c, int x, int y, lv_text_align_t al) {
+static int text_w(const char* s, const lv_font_t* f) {
+  lv_point_t sz;
+  lv_txt_get_size(&sz, s, f, 0, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
+  return sz.x;
+}
+
+/* Draws one line of text; anything right of max_x is cut off. */
+static void t(lv_draw_ctx_t* dc, const char* s, const lv_font_t* f, lv_color_t c, int x, int y, lv_text_align_t al,
+              int max_x = LV_COORD_MAX) {
   if (!s || !*s) return;
   lv_point_t sz;
   lv_txt_get_size(&sz, s, f, 0, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
   int x1 = al == LV_TEXT_ALIGN_RIGHT ? x - sz.x : x;
   lv_area_t a = {(lv_coord_t)x1, (lv_coord_t)y, (lv_coord_t)(x1 + sz.x), (lv_coord_t)(y + sz.y)};
-  if (!_lv_area_is_on(&a, dc->clip_area)) return;
+  lv_area_t clip = *dc->clip_area;
+  if (clip.x2 > max_x) clip.x2 = (lv_coord_t)max_x;
+  if (!_lv_area_is_on(&a, &clip)) return;
+  const lv_area_t* saved = dc->clip_area;
+  dc->clip_area = &clip;
   lv_draw_label_dsc_t d;
   lv_draw_label_dsc_init(&d);
   d.font = f;
   d.color = c;
   lv_draw_label(dc, &d, &a, s, nullptr);
+  dc->clip_area = saved;
 }
 
 static void row_event(lv_event_t* e) {
@@ -75,15 +88,20 @@ static void row_event(lv_event_t* e) {
   lv_area_t a;
   lv_obj_get_coords(o, &a);
   if (lv_obj_has_state(o, LV_STATE_PRESSED)) fx_fill_rect(f, a.x1, a.y1, a.x2, a.y2, p.sep, 255);
-  if (i) fx_fill_rect(f, a.x1 + 52, a.y1, a.x2, a.y1, p.sep, 255);
+  /* 2.8": narrower icon column and smaller type */
+  const bool cp = ui_compact();
+  const int tx = cp ? 40 : 52, pr = cp ? 8 : 12, y2 = cp ? 22 : 26;
+  const lv_font_t* f1 = cp ? &fs_text_14 : &fs_text_16;
+  const lv_font_t* f2 = cp ? &fs_text_12 : &fs_text_14;
+  if (i) fx_fill_rect(f, a.x1 + tx, a.y1, a.x2, a.y1, p.sep, 255);
 
   const AircraftIconMask& m = AIRCRAFT_ICONS[it.f.icon < ICON_COUNT ? it.f.icon : 0];
   lv_color_t c = (it.f.flags & FF_TRACKED) ? p.tracked
                  : (it.f.flags & (FF_MILITARY | FF_EMERGENCY)) ? p.alert_mil
                  : (it.f.flags & FF_WATCH) ? p.alert_watch
                                            : p.plane;
-  float scale = 26.0f / fmaxf(16.0f, (float)m.side);
-  float ix = a.x1 + 26, iy = (a.y1 + a.y2) / 2.0f, hdg = isnan(it.f.track) ? 0 : it.f.track;
+  float scale = (cp ? 20.0f : 26.0f) / fmaxf(16.0f, (float)m.side);
+  float ix = a.x1 + tx / 2, iy = (a.y1 + a.y2) / 2.0f, hdg = isnan(it.f.track) ? 0 : it.f.track;
   fx_mask(f, m.alpha, m.side, ix, iy, hdg, scale, c, 255);
   if (aircraft_is_helicopter_icon(it.f.icon)) { /* still rotor disc + blades, as on the radar */
     float rr = m.side * 0.41f * scale, hx, hy, ax, ay, bx, by;
@@ -94,9 +112,16 @@ static void row_event(lv_event_t* e) {
     fx_capsule(f, ax, ay, bx, by, 0.9f, c, 255);
   }
 
-  char id[12], line[48], dist[16], alt[16];
+  char id[12], line[48], dist[16], alt[16], right1[32], right2[32];
   flight_ident(it.f, id);
-  t(dc, id, &fs_text_16, p.text, a.x1 + 52, a.y1 + 6, LV_TEXT_ALIGN_LEFT);
+  fmt_dist(it.dist, dist, sizeof(dist));
+  snprintf(right1, sizeof(right1), "%s %s", dist, geo_compass8(it.bearing));
+  fmt_alt(it.f.alt_ft, alt, sizeof(alt));
+  const char* arrow = it.f.vs_fpm > 300 ? " \xE2\x86\x91" : (it.f.vs_fpm < -300 ? " \xE2\x86\x93" : "");
+  snprintf(right2, sizeof(right2), "%s%s", alt, arrow);
+  /* the left column stops short of the right one instead of running under it */
+  int lim1 = a.x2 - pr - text_w(right1, f1) - 6, lim2 = a.x2 - pr - text_w(right2, f2) - 6;
+  t(dc, id, f1, p.text, a.x1 + tx, a.y1 + 6, LV_TEXT_ALIGN_LEFT, lim1);
   RouteInfo r;
   if (it.f.callsign[0] && model_route(it.f.callsign, &r) == ROUTE_OK && r.orig_iata[0])
     snprintf(line, sizeof(line), "%s \xE2\x86\x92 %s  %s", r.orig_iata, r.dest_iata, it.f.type);
@@ -104,25 +129,20 @@ static void row_event(lv_event_t* e) {
     const char* reg = strcmp(it.f.reg, id) ? it.f.reg : ""; /* ident may already be the registration */
     snprintf(line, sizeof(line), "%s%s%s", it.f.type, reg[0] && it.f.type[0] ? "  " : "", reg);
   }
-  t(dc, line, &fs_text_14, p.text2, a.x1 + 52, a.y1 + 26, LV_TEXT_ALIGN_LEFT);
+  t(dc, line, f2, p.text2, a.x1 + tx, a.y1 + y2, LV_TEXT_ALIGN_LEFT, lim2);
 
-  fmt_dist(it.dist, dist, sizeof(dist));
-  snprintf(line, sizeof(line), "%s %s", dist, geo_compass8(it.bearing));
-  t(dc, line, &fs_text_16, p.text, a.x2 - 12, a.y1 + 6, LV_TEXT_ALIGN_RIGHT);
-  fmt_alt(it.f.alt_ft, alt, sizeof(alt));
-  const char* arrow = it.f.vs_fpm > 300 ? " \xE2\x86\x91" : (it.f.vs_fpm < -300 ? " \xE2\x86\x93" : "");
-  snprintf(line, sizeof(line), "%s%s", alt, arrow);
-  t(dc, line, &fs_text_14, it.f.vs_fpm < -64 ? p.tag_down : p.text2, a.x2 - 12, a.y1 + 26, LV_TEXT_ALIGN_RIGHT);
+  t(dc, right1, f1, p.text, a.x2 - pr, a.y1 + 6, LV_TEXT_ALIGN_RIGHT);
+  t(dc, right2, f2, it.f.vs_fpm < -64 ? p.tag_down : p.text2, a.x2 - pr, a.y1 + y2, LV_TEXT_ALIGN_RIGHT);
 }
 
 lv_obj_t* traffic_create(lv_obj_t* parent) {
   s_page = w_page(parent, "Traffic");
-  s_header = w_label(s_page, "", &fs_text_14, &ST_TEXT2);
+  s_header = w_label(s_page, "", ui_compact() ? &fs_text_12 : &fs_text_14, &ST_TEXT2);
   s_card = w_section(s_page, nullptr);
   for (int i = 0; i < ROWS; i++) {
     lv_obj_t* r = lv_obj_create(s_card);
     lv_obj_remove_style_all(r);
-    lv_obj_set_size(r, LV_PCT(100), 50);
+    lv_obj_set_size(r, LV_PCT(100), ui_compact() ? 42 : 50);
     lv_obj_add_flag(r, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_HIDDEN);
     lv_obj_clear_flag(r, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_set_user_data(r, (void*)(intptr_t)i);

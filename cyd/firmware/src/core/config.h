@@ -93,6 +93,7 @@ struct AppConfig {
   bool invert;        /* panel colour inversion (IPS clones) */
   bool bgr;           /* panel colour order */
   bool spi80;         /* 80 MHz SPI (faster, some panels can't) */
+  uint8_t board;      /* BoardId (core/board.h); 0 = detect at start-up */
 
   /* Audio */
   uint8_t audio_out;

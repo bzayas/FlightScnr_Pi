@@ -33,4 +33,6 @@ struct LayoutDef {
 };
 
 const LayoutDef& layout_get(uint8_t orient_class, uint8_t layout);
+/* Small (2.8", 240x320) screens use their own layouts. Set by ui_init. */
+void layouts_set_compact(bool compact);
 const char* family_name(uint8_t family);

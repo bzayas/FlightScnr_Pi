@@ -49,6 +49,10 @@
 #define SYM_GLOBE "\xEF\x82\xAC"
 #define SYM_SIGNAL "\xEF\x80\x92"
 
+/* 2.8" boards (240x320 / 320x240): screens use smaller type and tighter
+ * spacing. Depends only on the display, so it's valid from lv_init on. */
+inline bool ui_compact() { return LV_MIN(lv_disp_get_hor_res(nullptr), lv_disp_get_ver_res(nullptr)) < 300; }
+
 void widgets_init();
 void widgets_restyle();   /* after a palette change */
 

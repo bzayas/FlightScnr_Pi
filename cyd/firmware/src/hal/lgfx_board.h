@@ -10,30 +10,34 @@
  */
 
 
-/* LovyanGFX wiring for the 4.0" ESP32-32E display (E32R40T), from LCDWiki:
- * ST7796S on SPI2 (SCK 14, MOSI 13, MISO 12, CS 15, DC 2, RST = EN),
- * backlight IO27 (high = on), XPT2046 touch on the same bus (CS 33, IRQ 36).
- * Shared by the app (hal/display.cpp) and the display test (diag/). */
+/* LovyanGFX setup for every supported board (core/board.h): the panel
+ * driver, backlight and touch wiring come from board(). The LCD bus is the
+ * same on all of them: HSPI with IO_MUX pins 12/13/14 (up to 80 MHz). */
 #pragma once
 
 #include <LovyanGFX.hpp>
 
 #include "core/board.h"
 
-class LGFX_CYD40 : public lgfx::LGFX_Device {
+class LGFX_Board : public lgfx::LGFX_Device {
  public:
-  lgfx::Panel_ST7796 panel;
+  lgfx::Panel_ILI9341 ili9341;
+  lgfx::Panel_ST7789 st7789;
+  lgfx::Panel_ST7796 st7796;
   lgfx::Bus_SPI bus;
   lgfx::Light_PWM light;
   lgfx::Touch_XPT2046 touch;
 
-  void configure(bool spi80, bool invert, bool bgr) {
+  void configure(const BoardDef& b, bool spi80, bool invert, bool bgr) {
+    lgfx::Panel_LCD* panel = b.panel == PANEL_ST7796 ? (lgfx::Panel_LCD*)&st7796
+                             : b.panel == PANEL_ST7789 ? (lgfx::Panel_LCD*)&st7789
+                                                       : (lgfx::Panel_LCD*)&ili9341;
     {
       auto cfg = bus.config();
-      cfg.spi_host = SPI2_HOST; /* HSPI: IO_MUX pins 12/13/14 allow 80 MHz */
+      cfg.spi_host = SPI2_HOST;
       cfg.spi_mode = 0;
       cfg.freq_write = spi80 ? 80000000 : 40000000;
-      cfg.freq_read = 16000000;
+      cfg.freq_read = 6000000; /* ILI9341 / ST7789 reads are slow */
       cfg.spi_3wire = false;
       cfg.use_lock = true;
       cfg.dma_channel = SPI_DMA_CH_AUTO;
@@ -42,37 +46,37 @@ class LGFX_CYD40 : public lgfx::LGFX_Device {
       cfg.pin_miso = PIN_LCD_MISO;
       cfg.pin_dc = PIN_LCD_DC;
       bus.config(cfg);
-      panel.setBus(&bus);
+      panel->setBus(&bus);
     }
     {
-      auto cfg = panel.config();
+      auto cfg = panel->config();
       cfg.pin_cs = PIN_LCD_CS;
       cfg.pin_rst = PIN_LCD_RST;
       cfg.pin_busy = -1;
-      cfg.panel_width = LCD_NATIVE_W;
-      cfg.panel_height = LCD_NATIVE_H;
-      cfg.memory_width = LCD_NATIVE_W;
-      cfg.memory_height = LCD_NATIVE_H;
+      cfg.panel_width = b.w;
+      cfg.panel_height = b.h;
+      cfg.memory_width = b.w;
+      cfg.memory_height = b.h;
       cfg.offset_x = 0;
       cfg.offset_y = 0;
       cfg.offset_rotation = 0;
       cfg.dummy_read_pixel = 8;
       cfg.dummy_read_bits = 1;
       cfg.readable = true;
-      cfg.invert = invert;
+      cfg.invert = invert != b.invert;
       cfg.rgb_order = !bgr; /* LovyanGFX: false -> BGR */
       cfg.dlen_16bit = false;
-      cfg.bus_shared = true; /* XPT2046 shares the bus */
-      panel.config(cfg);
+      cfg.bus_shared = b.touch_shared;
+      panel->config(cfg);
     }
     {
       auto cfg = light.config();
-      cfg.pin_bl = PIN_LCD_BL;
+      cfg.pin_bl = b.bl;
       cfg.invert = false;
       cfg.freq = 20000; /* above audible range: no backlight whine */
       cfg.pwm_channel = 7;
       light.config(cfg);
-      panel.setLight(&light);
+      panel->setLight(&light);
     }
     {
       auto cfg = touch.config();
@@ -81,17 +85,18 @@ class LGFX_CYD40 : public lgfx::LGFX_Device {
       cfg.y_min = 0;
       cfg.y_max = 4095;
       cfg.pin_int = PIN_TOUCH_IRQ;
-      cfg.bus_shared = true;
+      cfg.bus_shared = b.touch_shared;
       cfg.offset_rotation = 0;
-      cfg.spi_host = SPI2_HOST;
+      /* 2.8" CYD: touch has its own pins, on the otherwise unused VSPI */
+      cfg.spi_host = b.touch_shared ? SPI2_HOST : SPI3_HOST;
       cfg.freq = 2500000;
-      cfg.pin_sclk = PIN_LCD_SCK;
-      cfg.pin_mosi = PIN_LCD_MOSI;
-      cfg.pin_miso = PIN_LCD_MISO;
+      cfg.pin_sclk = b.t_sck;
+      cfg.pin_mosi = b.t_mosi;
+      cfg.pin_miso = b.t_miso;
       cfg.pin_cs = PIN_TOUCH_CS;
       touch.config(cfg);
-      panel.setTouch(&touch);
+      panel->setTouch(&touch);
     }
-    setPanel(&panel);
+    setPanel(panel);
   }
 };

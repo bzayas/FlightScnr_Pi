@@ -11,7 +11,7 @@
 
 #define LGFX_USE_V1
 #include "display.h"
-#include "lgfx_cyd40.h"
+#include "lgfx_board.h"
 
 #include <Arduino.h>
 #include <LovyanGFX.hpp>
@@ -28,7 +28,7 @@
 /* ------------------------------------------------------------------------ */
 
 
-static LGFX_CYD40 lcd;
+static LGFX_Board lcd;
 static lv_disp_draw_buf_t s_draw_buf;
 static lv_disp_drv_t s_disp_drv;
 static lv_indev_drv_t s_indev_drv;
@@ -40,20 +40,38 @@ static uint8_t s_rotation;
 
 static TouchCal s_cal;
 
+/* One calibration per board: the touch panels differ. The 4.0" board keeps
+ * the original key. */
+static const char* cal_key() {
+  static char key[8];
+  if (board().id == BOARD_E32R40T) return "tcal";
+  snprintf(key, sizeof(key), "tcal%u", (unsigned)board().id);
+  return key;
+}
+
 static void cal_load() {
   Preferences p;
   p.begin("fs_state", true);
-  size_t n = p.getBytes("tcal", &s_cal, sizeof(s_cal));
+  size_t n = p.getBytes(cal_key(), &s_cal, sizeof(s_cal));
   p.end();
   if (n != sizeof(s_cal) || !s_cal.valid) {
-    /* Typical E32R40T orientation so the very first screens are usable
-     * before calibration (raw ~200..3900 on both axes, x mirrored). */
-    s_cal.a = -320.0f / 3700.0f;
-    s_cal.b = 0.0f;
-    s_cal.c = 320.0f + 200.0f * 320.0f / 3700.0f;
-    s_cal.d = 0.0f;
-    s_cal.e = 480.0f / 3700.0f;
-    s_cal.f = -200.0f * 480.0f / 3700.0f;
+    /* Typical orientation so the first screens are roughly usable; the
+     * first start runs calibration anyway. */
+    if (board().id == BOARD_E32R40T) { /* raw ~200..3900 on both axes, x mirrored */
+      s_cal.a = -320.0f / 3700.0f;
+      s_cal.b = 0.0f;
+      s_cal.c = 320.0f + 200.0f * 320.0f / 3700.0f;
+      s_cal.d = 0.0f;
+      s_cal.e = 480.0f / 3700.0f;
+      s_cal.f = -200.0f * 480.0f / 3700.0f;
+    } else { /* 2.8" CYD: axes swapped, raw x ~200..3700, y ~240..3800 */
+      s_cal.a = 0.0f;
+      s_cal.b = -240.0f / 3560.0f;
+      s_cal.c = 239.0f + 240.0f * 240.0f / 3560.0f;
+      s_cal.d = 320.0f / 3500.0f;
+      s_cal.e = 0.0f;
+      s_cal.f = -200.0f * 320.0f / 3500.0f;
+    }
     s_cal.valid = false;
   }
 }
@@ -63,7 +81,7 @@ void plat_touch_set_cal(const TouchCal& cal) {
   s_cal.valid = true;
   Preferences p;
   p.begin("fs_state", false);
-  p.putBytes("tcal", &s_cal, sizeof(s_cal));
+  p.putBytes(cal_key(), &s_cal, sizeof(s_cal));
   p.end();
 }
 
@@ -149,8 +167,8 @@ static void flush_cb(lv_disp_drv_t* drv, const lv_area_t* a, lv_color_t* px) {
   lv_disp_flush_ready(drv);
 }
 
-int display_width() { return (s_rotation & 1) ? LCD_NATIVE_H : LCD_NATIVE_W; }
-int display_height() { return (s_rotation & 1) ? LCD_NATIVE_W : LCD_NATIVE_H; }
+int display_width() { return (s_rotation & 1) ? board().h : board().w; }
+int display_height() { return (s_rotation & 1) ? board().w : board().h; }
 
 /* ------------------------------------------------------------------------ */
 /* Backlight easing                                                          */
@@ -163,7 +181,7 @@ void plat_set_backlight(uint8_t pct) { s_bl_target = pct > 100 ? 100 : pct; }
 
 void plat_apply_panel_settings() {
   lcd.startWrite();
-  lcd.invertDisplay(g_cfg.invert);
+  lcd.invertDisplay(g_cfg.invert != board().invert);
   lcd.endWrite();
 }
 
@@ -187,9 +205,9 @@ void display_service() {
   lcd.setBrightness(pwm);
 }
 
-void display_init(uint8_t rotation, uint16_t draw_lines) {
+void display_init(uint8_t rotation, uint32_t buf_bytes) {
   s_rotation = rotation & 3;
-  lcd.configure(g_cfg.spi80, g_cfg.invert, g_cfg.bgr);
+  lcd.configure(board(), g_cfg.spi80, g_cfg.invert, g_cfg.bgr);
   lcd.init();
   lcd.setRotation(s_rotation);
   lcd.fillScreen(TFT_BLACK);
@@ -217,6 +235,8 @@ void display_init(uint8_t rotation, uint16_t draw_lines) {
   lv_init();
   plat_mem_mark("lvgl");
   int w = display_width();
+  int draw_lines = (int)(buf_bytes / (w * sizeof(lv_color_t)));
+  if (draw_lines < 8) draw_lines = 8;
   size_t px = (size_t)w * draw_lines;
   auto* b1 = (lv_color_t*)heap_caps_malloc(px * sizeof(lv_color_t), MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL);
   auto* b2 = (lv_color_t*)heap_caps_malloc(px * sizeof(lv_color_t), MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL);

@@ -74,8 +74,74 @@ static const LayoutDef LANDSCAPE[LAYOUT_COUNT] = {
       {402, 124, 72, 72, FAM_CIRCULAR, 0}}},
 };
 
+/* 2.8" boards: portrait 240x320. Same slots, families and order as the
+ * 320x480 layouts, so a face set up on one screen carries over. */
+static const LayoutDef PORTRAIT_S[LAYOUT_COUNT] = {
+    {"Infograph",
+     120, 172, 100,
+     7,
+     {{6, 2, 154, 66, FAM_LARGE, 0},
+      {174, 4, 62, 62, FAM_CIRCULAR, 0},
+      {2, 72, 44, 32, FAM_CORNER, CORNER_TL},
+      {194, 72, 44, 32, FAM_CORNER, CORNER_TR},
+      {2, 240, 44, 30, FAM_CORNER, CORNER_BL},
+      {194, 240, 44, 30, FAM_CORNER, CORNER_BR},
+      {6, 276, 228, 42, FAM_RECT, 0}}},
+    {"Modular",
+     120, 138, 74,
+     5,
+     {{8, 2, 224, 58, FAM_LARGE, 0},
+      {10, 216, 66, 56, FAM_CIRCULAR, 0},
+      {87, 216, 66, 56, FAM_CIRCULAR, 0},
+      {164, 216, 66, 56, FAM_CIRCULAR, 0},
+      {6, 276, 228, 42, FAM_RECT, 0}}},
+    {"Radar Focus",
+     120, 160, 112,
+     6,
+     {{6, 3, 228, 24, FAM_INLINE, 0},
+      {6, 293, 228, 24, FAM_INLINE, 0},
+      {2, 30, 56, 32, FAM_CORNER, CORNER_TL},
+      {182, 30, 56, 32, FAM_CORNER, CORNER_TR},
+      {2, 258, 56, 32, FAM_CORNER, CORNER_BL},
+      {182, 258, 56, 32, FAM_CORNER, CORNER_BR}}},
+};
+
+/* 2.8" boards: landscape 320x240. */
+static const LayoutDef LANDSCAPE_S[LAYOUT_COUNT] = {
+    {"Infograph",
+     160, 120, 96,
+     6,
+     {{2, 2, 76, 58, FAM_LARGE, 0},
+      {262, 4, 54, 54, FAM_CIRCULAR, 0},
+      {4, 92, 54, 54, FAM_CIRCULAR, 0},
+      {262, 92, 54, 54, FAM_CIRCULAR, 0},
+      {2, 186, 72, 52, FAM_CORNER, CORNER_BL},
+      {246, 186, 72, 52, FAM_CORNER, CORNER_BR}}},
+    {"Modular",
+     110, 120, 104,
+     5,
+     {{220, 2, 98, 58, FAM_LARGE, 0},
+      {220, 64, 98, 54, FAM_RECT, 0},
+      {220, 122, 98, 54, FAM_RECT, 0},
+      {220, 180, 48, 58, FAM_CIRCULAR, 0},
+      {270, 180, 48, 58, FAM_CIRCULAR, 0}}},
+    {"Radar Focus",
+     160, 120, 112,
+     6,
+     {{2, 2, 70, 44, FAM_CORNER, CORNER_TL},
+      {248, 2, 70, 44, FAM_CORNER, CORNER_TR},
+      {2, 194, 70, 44, FAM_CORNER, CORNER_BL},
+      {248, 194, 70, 44, FAM_CORNER, CORNER_BR},
+      {2, 96, 46, 48, FAM_CIRCULAR, 0},
+      {272, 96, 46, 48, FAM_CIRCULAR, 0}}},
+};
+
+static bool s_compact;
+void layouts_set_compact(bool compact) { s_compact = compact; }
+
 const LayoutDef& layout_get(uint8_t orient_class, uint8_t layout) {
   if (layout >= LAYOUT_COUNT) layout = 0;
+  if (s_compact) return orient_class == ORIENT_LANDSCAPE ? LANDSCAPE_S[layout] : PORTRAIT_S[layout];
   return orient_class == ORIENT_LANDSCAPE ? LANDSCAPE[layout] : PORTRAIT[layout];
 }
 

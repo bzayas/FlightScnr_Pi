@@ -80,7 +80,7 @@ class Handler(SimpleHTTPRequestHandler):
             return self.send_json(CONFIG)
         if self.path == "/api/status":
             return self.send_json({
-                "device": "FlightScnr-1A2B", "version": "dev", "board": "ESP32-32E 4.0in (E32R40T)",
+                "device": "FlightScnr-1A2B", "version": "dev", "board": "ESP32-2432S028R 2.8in ILI9341",
                 "uptime_s": int(time.time() - START) + 5400, "heap": 61234, "heap_min": 40112,
                 "wifi": {"connected": True, "ssid": CONFIG["wifi"]["ssid"], "ip": "192.168.1.42", "rssi": -58, "ap": False, "ap_ssid": "", "host": CONFIG["wifi"]["host"]},
                 "time": {"synced": True, "epoch": int(time.time()), "tz": CONFIG["loc"]["posix"]},

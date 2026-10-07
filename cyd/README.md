@@ -11,7 +11,7 @@
 
 # FlightScnr for the Cheap Yellow Display
 
-A native port of [FlightScnr Pi](https://github.com/yashmulgaonkar/FlightScnr_Pi) to the **4.0″ ESP32-32E “Cheap Yellow Display”** (320×480 ST7796S, resistive touch). The live radar *is* the watch face, framed by Apple Watch-style complications for time, weather, sunrise and sunset, and flights. You set it up and flash it from your browser.
+A native port of [FlightScnr Pi](https://github.com/yashmulgaonkar/FlightScnr_Pi) to the ESP32 **“Cheap Yellow Display”**: the common **2.8″ ESP32-2432S028R** (240×320) and the **4.0″ ESP32-32E** (320×480). One firmware runs on both and recognises the board by itself. The live radar *is* the watch face, framed by Apple Watch-style complications for time, weather, sunrise and sunset, and flights. You set it up and flash it from your browser.
 
 <p align="center">
   <img src="installer/img/p_face_night.webp" width="200" alt="Infograph face, night theme">
@@ -60,16 +60,17 @@ A native port of [FlightScnr Pi](https://github.com/yashmulgaonkar/FlightScnr_Pi
 
 ## Hardware
 
-| | |
-|---|---|
-| Board | 4.0″ ESP32-32E display, often listed as **E32R40T** (touch) / E32N40T. See [LCDWiki](https://www.lcdwiki.com/4.0inch_ESP32-32E_Display) |
-| MCU | ESP32-D0WD-V3, 240 MHz, 4 MB flash, no PSRAM |
-| Display | ST7796S 320×480 TN, SPI: SCK 14, MOSI 13, MISO 12, CS 15, DC 2, backlight 27 |
-| Touch | XPT2046 resistive on the shared bus, CS 33, IRQ 36 |
-| Audio | DAC on GPIO 26 → onboard amplifier (enable on GPIO 4, active low) → speaker connector |
-| Other | RGB LED 22/16/17, BOOT key 0 |
+| | 2.8″ ESP32-2432S028R (the original CYD) | 4.0″ ESP32-32E (LCDWiki **E32R40T** / E32N40T) |
+|---|---|---|
+| MCU | ESP32-D0WD-V3, 240 MHz, 4 MB flash, no PSRAM | same |
+| Display | ILI9341 240×320 TN (the USB-C revision: ST7789) | ST7796S 320×480 TN |
+| LCD SPI | SCK 14, MOSI 13, MISO 12, CS 15, DC 2 | same |
+| Backlight | GPIO 21 | GPIO 27 |
+| Touch | XPT2046 on its own pins: SCK 25, MOSI 32, MISO 39, CS 33, IRQ 36 | XPT2046 on the LCD bus, CS 33, IRQ 36 |
+| Audio | DAC GPIO 26 → amplifier → speaker connector | same, amplifier enable GPIO 4 (active low) |
+| RGB LED | 4 / 16 / 17 | 22 / 16 / 17 |
 
-The 2.8″ and 3.5″ CYDs (ILI9341/ST7789, 240×320) use different hardware and are **not** supported by this build. Optional extras: a small 8 Ω speaker on the speaker connector, or any Bluetooth speaker.
+FlightScnr asks the screen for its ID at start-up to tell the boards apart (the ST7796 and ST7789 answer; otherwise it's the ILI9341 CYD). If your screen stays dark, set the board by hand in the installer under **Display → Board**. The 3.5″ boards aren't supported yet. Optional extras: a small 8 Ω speaker on the speaker connector, or any Bluetooth speaker.
 
 ## Install
 
@@ -136,7 +137,7 @@ The free plan allows 500 calls a day and 25 an hour. FlightScnr uses about 120 a
 1. On the installer's **Install** page, open **Device log** with the board plugged in. It restarts the board and shows everything it prints, and explains brownouts (weak USB power) and crashes in plain words.
 2. Flash the **display test** to separate hardware from software. Get `flightscnr-cyd-display-test-<version>.bin` from the *flightscnr-cyd-display-test* CI artifact, or build it with `pio run -e cyd-display-test && python3 tools/package_firmware.py --display-test out/`. Then choose *Use a different file…* and *Firmware only*; your settings stay.
 
-   Watch the screen and the back of the board while it runs, and note the step number in the log whenever something happens. It uses plain GPIO and SPI, not the app's display code. Step 0 flashes the RGB LED. Steps A1–A7 turn on, one at a time, each pin that a known ESP32 320×480 board uses for its backlight. Steps B1–B4 drive the screen with each known wiring, read its ID and fill it red, green and blue. *Lit at A1 and colours at B1* means the board is wired like the E32R40T. Any other step points to a different board, so please open an issue with the log. If nothing ever lights up, check the power and the screen's ribbon cable. Reinstall FlightScnr afterwards.
+   Watch the screen and the back of the board while it runs, and note the step number in the log whenever something happens. It uses plain GPIO and SPI, not the app's display code. Step 0 flashes the RGB LED. Steps A1–A7 turn on, one at a time, each pin that a known ESP32 320×480 board uses for its backlight. Steps B1–B4 drive the screen with each known wiring, read its ID and fill it red, green and blue. *Lit at A1 and colours at B1* means a 4.0″ E32R40T; *lit at A2 and colours at B1* means a 2.8″ ESP32-2432S028R. Any other step points to a different board, so please open an issue with the log. If nothing ever lights up, check the power and the screen's ribbon cable. Reinstall FlightScnr afterwards.
 
 ### Device page stuck on "Connecting to the display"?
 
@@ -196,6 +197,7 @@ Tricks used to make a small TN panel feel smooth:
 cd cyd/firmware
 pio run -e cyd-e32r40t                    # firmware (PlatformIO, Arduino-ESP32 2.0.17)
 make -C sim -j && sim/build/fs_sim --out shots && sim/build/fs_sim --landscape --out shots
+sim/build/fs_sim --small --out shots       # the 2.8″ CYD (240×320); add --landscape for 320×240
 make -C sim check                         # installer JS and firmware agree on the settings format
 python3 tools/build_portal.py             # after editing cyd/installer: re-embed the device portal
 python3 tools/package_firmware.py ../installer/firmware

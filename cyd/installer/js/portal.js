@@ -168,7 +168,7 @@ async function save() {
   if (!Object.keys(patch).length) return;
   const reboot =
     (patch.face && 'rotation' in patch.face) ||
-    (patch.display && 'spi80' in patch.display) ||
+    (patch.display && ('spi80' in patch.display || 'board' in patch.display)) ||
     (patch.audio && patch.audio.out === 'bluetooth' && baseline.audio.out !== 'bluetooth');
   const btnSave = bar.querySelector('.primary');
   btnSave.disabled = true;
@@ -227,6 +227,8 @@ async function boot() {
     return;
   }
   ui = new PortalUI({ mode: 'portal', cfg: structuredClone(baseline), onChange: updateBar, api });
+  // Face previews match the screen this display actually has.
+  if (lastStatus?.board) ui.board = /E32R40T/.test(lastStatus.board) ? 'e32r40t' : 'cyd28';
   window.addEventListener('hashchange', route);
   route();
 }

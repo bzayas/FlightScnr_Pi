@@ -170,16 +170,21 @@ static void show_disclaimer() {
   lv_obj_set_style_bg_opa(s_scr, LV_OPA_COVER, 0);
   make_plate(s_scr);
 
-  /* Landscape (480x320) is short: the icon sits beside the title and the
-   * checkbox shares the bottom row with Accept / the countdown. */
-  const bool land = lv_disp_get_hor_res(nullptr) > lv_disp_get_ver_res(nullptr);
+  /* Landscape and the 2.8" screen are short: the icon sits beside the title,
+   * the checkbox shares the bottom row with Accept / the countdown, and the
+   * text scrolls if it still doesn't fit (Accept always stays on screen). */
+  const lv_coord_t hor = lv_disp_get_hor_res(nullptr), ver = lv_disp_get_ver_res(nullptr);
+  const bool small = ui_compact();
+  const bool land = hor > ver || small;
+  const lv_coord_t pad = small ? 8 : (land ? 10 : 14), gap = small ? 6 : (land ? 8 : 12);
+  const lv_coord_t bottom_h = small ? 40 : 46;
   lv_obj_t* col = lv_obj_create(s_scr);
   lv_obj_remove_style_all(col);
   lv_obj_set_size(col, LV_PCT(100), LV_PCT(100));
   lv_obj_set_flex_flow(col, LV_FLEX_FLOW_COLUMN);
   lv_obj_set_flex_align(col, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-  lv_obj_set_style_pad_all(col, land ? 10 : 14, 0);
-  lv_obj_set_style_pad_row(col, land ? 8 : 12, 0);
+  lv_obj_set_style_pad_all(col, pad, 0);
+  lv_obj_set_style_pad_row(col, gap, 0);
   lv_obj_clear_flag(col, LV_OBJ_FLAG_SCROLLABLE);
 
   lv_obj_t* card = lv_obj_create(col);
@@ -188,14 +193,16 @@ static void show_disclaimer() {
   lv_obj_set_style_bg_opa(card, LV_OPA_COVER, 0);
   lv_obj_set_style_border_color(card, color_rgb(40, 90, 55), 0);
   lv_obj_set_style_border_width(card, 1, 0);
-  lv_obj_set_style_radius(card, 20, 0);
-  lv_obj_set_style_pad_hor(card, 16, 0);
-  lv_obj_set_style_pad_ver(card, land ? 10 : 16, 0);
-  lv_obj_set_style_pad_row(card, land ? 5 : 8, 0);
+  lv_obj_set_style_radius(card, small ? 14 : 20, 0);
+  lv_obj_set_style_pad_hor(card, small ? 12 : 16, 0);
+  lv_obj_set_style_pad_ver(card, land ? (small ? 6 : 10) : 16, 0);
+  lv_obj_set_style_pad_row(card, small ? 3 : (land ? 5 : 8), 0);
   lv_obj_set_size(card, LV_PCT(100), LV_SIZE_CONTENT);
+  lv_obj_set_style_max_height(card, ver - 2 * pad - gap - (land ? bottom_h : 100), 0);
   lv_obj_set_flex_flow(card, LV_FLEX_FLOW_COLUMN);
   lv_obj_set_flex_align(card, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-  lv_obj_clear_flag(card, LV_OBJ_FLAG_SCROLLABLE);
+  lv_obj_set_scroll_dir(card, LV_DIR_VER);
+  lv_obj_set_scrollbar_mode(card, LV_SCROLLBAR_MODE_AUTO);
 
   lv_obj_t* head = card;
   if (land) {
@@ -209,10 +216,14 @@ static void show_disclaimer() {
   }
   lv_obj_t* icon = w_label(head, SYM_WARN, land ? &fs_icons_18 : &fs_icons_24, nullptr);
   lv_obj_set_style_text_color(icon, p.orange, 0);
-  lv_obj_t* title = w_label(head, DISCLAIMER_TITLE, &fs_text_16, nullptr);
+  lv_obj_t* title = w_label(head, DISCLAIMER_TITLE, small ? &fs_text_14 : &fs_text_16, nullptr);
+  if (small && hor < ver) { /* 240 px: the title wraps beside its icon */
+    lv_obj_set_width(title, hor - 2 * pad - 24 - 18 - 8);
+    lv_label_set_long_mode(title, LV_LABEL_LONG_WRAP);
+  }
   lv_obj_set_style_text_color(title, color_rgb(255, 196, 64), 0);
   for (auto para : DISCLAIMER_PARAGRAPHS) {
-    lv_obj_t* l = w_label(card, para, &fs_text_14, nullptr);
+    lv_obj_t* l = w_label(card, para, small ? &fs_text_12 : &fs_text_14, nullptr);
     lv_obj_set_style_text_color(l, color_rgb(210, 220, 228), 0);
     lv_obj_set_width(l, LV_PCT(100));
     lv_label_set_long_mode(l, LV_LABEL_LONG_WRAP);
@@ -226,10 +237,10 @@ static void show_disclaimer() {
   if (land) {
     bottom = lv_obj_create(col);
     lv_obj_remove_style_all(bottom);
-    lv_obj_set_size(bottom, LV_PCT(100), 46);
+    lv_obj_set_size(bottom, LV_PCT(100), bottom_h);
     lv_obj_set_flex_flow(bottom, LV_FLEX_FLOW_ROW);
     lv_obj_set_flex_align(bottom, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-    lv_obj_set_style_pad_hor(bottom, 6, 0);
+    lv_obj_set_style_pad_hor(bottom, small ? 2 : 6, 0);
     lv_obj_clear_flag(bottom, LV_OBJ_FLAG_SCROLLABLE);
   }
 
@@ -239,13 +250,13 @@ static void show_disclaimer() {
   lv_obj_set_size(row, LV_SIZE_CONTENT, 34);
   lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
   lv_obj_set_flex_align(row, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-  lv_obj_set_style_pad_column(row, 10, 0);
+  lv_obj_set_style_pad_column(row, small ? 6 : 10, 0);
   lv_obj_add_flag(row, LV_OBJ_FLAG_CLICKABLE);
   lv_obj_set_ext_click_area(row, 10);
   lv_obj_add_event_cb(row, on_remember, LV_EVENT_CLICKED, nullptr);
   s_check_box = lv_obj_create(row);
   lv_obj_remove_style_all(s_check_box);
-  lv_obj_set_size(s_check_box, 24, 24);
+  lv_obj_set_size(s_check_box, small ? 22 : 24, small ? 22 : 24);
   lv_obj_set_style_radius(s_check_box, 6, 0);
   lv_obj_set_style_border_color(s_check_box, c_check(), 0);
   lv_obj_set_style_border_width(s_check_box, 2, 0);
@@ -254,13 +265,13 @@ static void show_disclaimer() {
   lv_obj_t* mark = w_label(s_check_box, SYM_OK, &fs_icons_14, nullptr);
   lv_obj_set_style_text_color(mark, lv_color_white(), 0);
   lv_obj_center(mark);
-  lv_obj_t* rl = w_label(row, REMEMBER_LABEL, &fs_text_16, nullptr);
+  lv_obj_t* rl = w_label(row, REMEMBER_LABEL, small ? (hor < ver ? &fs_text_12 : &fs_text_14) : &fs_text_16, nullptr);
   lv_obj_set_style_text_color(rl, color_rgb(210, 220, 228), 0);
   draw_check();
 
   if (remembered) {
     /* Remembered: still shown, auto-continues after a countdown (no Accept). */
-    s_count_label = w_label(bottom, "", &fs_text_16, nullptr);
+    s_count_label = w_label(bottom, "", small ? &fs_text_14 : &fs_text_16, nullptr);
     lv_obj_set_style_text_color(s_count_label, color_rgb(48, 255, 96), 0);
     s_countdown = AUTO_CONTINUE_S + 1;
     countdown_tick(nullptr);
@@ -269,7 +280,9 @@ static void show_disclaimer() {
     s_countdown = 0;
     lv_obj_t* btn = lv_btn_create(bottom);
     lv_obj_remove_style_all(btn);
-    if (land)
+    if (small)
+      lv_obj_set_size(btn, hor > ver ? 130 : 86, 38);
+    else if (land)
       lv_obj_set_size(btn, 190, 44);
     else
       lv_obj_set_size(btn, LV_PCT(70), 46);
@@ -277,7 +290,7 @@ static void show_disclaimer() {
     lv_obj_set_style_bg_opa(btn, LV_OPA_COVER, 0);
     lv_obj_set_style_bg_color(btn, c_btn(), 0);
     lv_obj_set_style_bg_color(btn, color_rgb(70, 210, 110), LV_STATE_PRESSED);
-    lv_obj_t* bl = w_label(btn, ACCEPT_LABEL, &fs_text_20, nullptr);
+    lv_obj_t* bl = w_label(btn, ACCEPT_LABEL, small ? &fs_text_16 : &fs_text_20, nullptr);
     lv_obj_set_style_text_color(bl, lv_color_white(), 0);
     lv_obj_center(bl);
     lv_obj_add_event_cb(btn, on_accept, LV_EVENT_CLICKED, nullptr);

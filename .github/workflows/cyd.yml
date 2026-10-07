@@ -84,6 +84,8 @@ jobs:
           make -C sim -j"$(nproc)"
           sim/build/fs_sim --out sim/shots
           sim/build/fs_sim --landscape --out sim/shots
+          sim/build/fs_sim --small --out sim/shots
+          sim/build/fs_sim --small --landscape --out sim/shots
           python3 -m pip install --quiet pillow
           python3 - <<'EOF'
           import glob

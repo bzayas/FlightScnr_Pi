@@ -85,6 +85,7 @@ static void handle_post_config() {
   JsonDocument doc;
   doc["ok"] = true;
   doc["reboot"] = probe["face"]["rotation"].is<int>() || probe["display"]["spi80"].is<bool>() ||
+                  probe["display"]["board"].is<const char*>() ||
                   probe["audio"]["out"].is<const char*>();
   send_json(200, doc);
 }
@@ -96,7 +97,7 @@ static void handle_status() {
     ModelGuard g;
     doc["device"] = plat_device_name();
     doc["version"] = FS_VERSION;
-    doc["board"] = BOARD_NAME;
+    doc["board"] = board().name;
     doc["uptime_s"] = now / 1000;
     doc["heap"] = plat_free_heap();
     doc["heap_min"] = plat_min_free_heap();

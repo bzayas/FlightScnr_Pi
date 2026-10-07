@@ -93,7 +93,7 @@ static void apply_patch(const char* json) {
   bool wifi_changed = strcmp(before.wifi_ssid, g_cfg.wifi_ssid) || strcmp(before.wifi_pass, g_cfg.wifi_pass);
   /* Switching to Bluetooth needs a restart so its RAM is reserved at boot.
    * Only on the switch itself: any other change must not restart. */
-  bool needs_reboot = before.rotation != g_cfg.rotation || before.spi80 != g_cfg.spi80 ||
+  bool needs_reboot = before.rotation != g_cfg.rotation || before.spi80 != g_cfg.spi80 || before.board != g_cfg.board ||
                       (before.audio_out != AUDIO_BLUETOOTH && g_cfg.audio_out == AUDIO_BLUETOOTH && !g_bt_mem_kept);
   uint32_t mask = diff_mask(before, g_cfg);
   if (mask & UI_CHANGED_LOCATION) plat_apply_timezone(g_cfg.tz_posix);
@@ -147,12 +147,6 @@ void setup() {
   Serial.printf("[boot] last reset: %s, heap %u\n", reset_reason_name(esp_reset_reason()),
                 (unsigned)plat_free_heap());
   pinMode(PIN_BOOT_KEY, INPUT_PULLUP);
-  for (int pin : {PIN_LED_R, PIN_LED_G, PIN_LED_B}) {
-    pinMode(pin, OUTPUT);
-    digitalWrite(pin, HIGH); /* common anode: off */
-  }
-  pinMode(PIN_AUDIO_EN, OUTPUT);
-  digitalWrite(PIN_AUDIO_EN, HIGH); /* amplifier off (no hiss at idle) */
 
   model_init();
   cmd_init();
@@ -167,10 +161,20 @@ void setup() {
                 (unsigned)plat_free_heap());
   plat_apply_timezone(g_cfg.tz_posix);
 
-  /* Two 16-line bands (2 x 10 KB) keep DMA and rendering overlapped; more
-   * buys little speed and the board has no PSRAM. Bluetooth Classic owns
-   * ~100 KB of RAM, so it gets smaller ones. */
-  display_init(g_cfg.rotation, g_bt_mem_kept ? 12 : 16);
+  board_select(g_cfg.board);
+  for (int pin : {board().led_r, board().led_g, board().led_b}) {
+    pinMode(pin, OUTPUT);
+    digitalWrite(pin, HIGH); /* common anode: off */
+  }
+  if (board().audio_en >= 0) {
+    pinMode(board().audio_en, OUTPUT);
+    digitalWrite(board().audio_en, HIGH); /* amplifier off (no hiss at idle) */
+  }
+
+  /* Two ~10 KB bands keep DMA and rendering overlapped; more buys little
+   * speed and the board has no PSRAM. Bluetooth Classic owns ~100 KB of
+   * RAM, so it gets smaller ones. */
+  display_init(g_cfg.rotation, g_bt_mem_kept ? 7680 : 10240);
   Serial.printf("[boot] display ok, heap %u\n", (unsigned)plat_free_heap());
   ui_init(display_width(), display_height());
   Serial.printf("[boot] ui ok, heap %u\n", (unsigned)plat_free_heap());

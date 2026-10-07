@@ -17,9 +17,10 @@ import {
   COMP_GROUPS,
   DEFAULT_SLOTS,
   FAMILY_NAMES,
-  LAYOUTS,
+  layoutsFor,
   RANGES_NM,
   ROTATIONS,
+  BOARDS,
   SOURCES,
   get,
   orientClass,
@@ -580,7 +581,7 @@ export class SettingsUI {
   faceBody() {
     const c = this.cfg;
     const oc = this.editOrient;
-    const L = LAYOUTS[oc];
+    const L = layoutsFor(this.board || c.display.board)[oc];
     const layKey = c.face.layout[oc];
     const lay = L.list.find((l) => l.key === layKey) || L.list[0];
     const slots = c.face.slots[oc][lay.key];
@@ -742,7 +743,7 @@ export class SettingsUI {
         this.seg('Play sound through', 'audio.out', [{ v: 'off', t: 'Off' }, { v: 'speaker', t: 'Speaker' }, { v: 'bluetooth', t: 'Bluetooth' }], null, { onPick: renderBt }),
         this.slider('Volume', 'audio.vol'),
         testRow,
-      ], 'The CYD’s speaker connector (P4) needs a small 8 Ω speaker.'),
+      ], 'The CYD’s speaker connector needs a small 8 Ω speaker.'),
       bt,
       this.group('Chimes & alerts', [
         this.toggle('Hourly chime', 'audio.chime'),
@@ -829,10 +830,11 @@ export class SettingsUI {
       this.header('Display', 'Brightness follows the theme: the day level from sunrise to sunset, the night level after dark.'),
       this.group('Brightness', [this.slider('Daytime', 'display.bright_day', { min: 5 }), this.slider('Night', 'display.bright_night', { min: 2 })]),
       this.group('Panel', [
-        this.toggle('Invert colours', 'display.invert', 'Turn on if colours look like a photo negative. Some 4″ CYD clones use IPS panels.'),
+        this.select('Board', 'display.board', BOARDS.map((b) => ({ v: b.v, t: b.name })), 'FlightScnr recognises the board from its screen. Pick one only if the screen stays dark. Restarts the device.'),
+        this.toggle('Invert colours', 'display.invert', 'Turn on if colours look like a photo negative. Some CYD clones use IPS panels.'),
         this.toggle('BGR colour order', 'display.bgr', 'Turn off if red and blue are swapped.'),
         this.toggle('Fast SPI (80 MHz)', 'display.spi80', 'Smoother animation. Turn off if you see noise or stripes. Restarts the device.'),
-      ], 'The E32R40T’s ST7796 is a TN panel: it looks best viewed straight on, which is why the themes favour bold, flat colours.'),
+      ], 'Most CYD screens are TN panels: they look best viewed straight on, which is why the themes favour bold, flat colours.'),
     ];
   }
 }

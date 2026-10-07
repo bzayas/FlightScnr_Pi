@@ -174,6 +174,31 @@ export const LAYOUTS = {
     ],
   },
 };
+
+// 2.8" boards (240x320): same layouts, slots and order as above, so a face
+// carries over between screens. Mirrors PORTRAIT_S / LANDSCAPE_S in the
+// firmware's src/ui/layouts.cpp.
+const resize = (big, w, h, geo) => ({
+  w,
+  h,
+  list: big.list.map((l, i) => ({ ...l, radar: geo[i].radar, slots: l.slots.map((sd, k) => ({ ...sd, ...geo[i].slots[k] })) })),
+});
+const g = (x, y, w, h) => ({ x, y, w, h });
+export const LAYOUTS_SMALL = {
+  p: resize(LAYOUTS.p, 240, 320, [
+    { radar: { cx: 120, cy: 172, r: 100 }, slots: [g(6, 2, 154, 66), g(174, 4, 62, 62), g(2, 72, 44, 32), g(194, 72, 44, 32), g(2, 240, 44, 30), g(194, 240, 44, 30), g(6, 276, 228, 42)] },
+    { radar: { cx: 120, cy: 138, r: 74 }, slots: [g(8, 2, 224, 58), g(10, 216, 66, 56), g(87, 216, 66, 56), g(164, 216, 66, 56), g(6, 276, 228, 42)] },
+    { radar: { cx: 120, cy: 160, r: 112 }, slots: [g(6, 3, 228, 24), g(6, 293, 228, 24), g(2, 30, 56, 32), g(182, 30, 56, 32), g(2, 258, 56, 32), g(182, 258, 56, 32)] },
+  ]),
+  l: resize(LAYOUTS.l, 320, 240, [
+    { radar: { cx: 160, cy: 120, r: 96 }, slots: [g(2, 2, 76, 58), g(262, 4, 54, 54), g(4, 92, 54, 54), g(262, 92, 54, 54), g(2, 186, 72, 52), g(246, 186, 72, 52)] },
+    { radar: { cx: 110, cy: 120, r: 104 }, slots: [g(220, 2, 98, 58), g(220, 64, 98, 54), g(220, 122, 98, 54), g(220, 180, 48, 58), g(270, 180, 48, 58)] },
+    { radar: { cx: 160, cy: 120, r: 112 }, slots: [g(2, 2, 70, 44), g(248, 2, 70, 44), g(2, 194, 70, 44), g(248, 194, 70, 44), g(2, 96, 46, 48), g(272, 96, 46, 48)] },
+  ]),
+};
+// Face previews for a board setting; "auto" shows the 2.8" CYD, the most common one.
+export const layoutsFor = (board) => (board === 'e32r40t' ? LAYOUTS : LAYOUTS_SMALL);
+
 export const FACE_MAX_SLOTS = 8;
 
 const pad8 = (a) => [...a, ...Array(FACE_MAX_SLOTS - a.length).fill('none')];
@@ -197,6 +222,14 @@ export const ROTATIONS = [
   { v: 3, name: 'Landscape, flipped', cls: 'l' },
 ];
 export const orientClass = (rotation) => ((rotation & 1) ? 'l' : 'p');
+
+// Supported boards (firmware: core/board.h, BoardId order).
+export const BOARDS = [
+  { v: 'auto', name: 'Detect automatically' },
+  { v: 'cyd28', name: '2.8″ ESP32-2432S028R (micro-USB)' },
+  { v: 'cyd28usbc', name: '2.8″ ESP32-2432S028 (USB-C, ST7789)' },
+  { v: 'e32r40t', name: '4.0″ ESP32-32E E32R40T / E32N40T' },
+];
 
 // Same defaults as cfg_defaults() (which mirror the Pi's .env.example).
 export function defaults() {
@@ -228,7 +261,7 @@ export function defaults() {
       layout: { p: 'infograph', l: 'infograph' },
       slots: structuredClone(DEFAULT_SLOTS),
     },
-    display: { bright_day: 100, bright_night: 35, invert: false, bgr: true, spi80: false },
+    display: { bright_day: 100, bright_night: 35, invert: false, bgr: true, spi80: false, board: 'auto' },
     audio: {
       out: 'speaker',
       bt_name: '',

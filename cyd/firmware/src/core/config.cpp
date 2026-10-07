@@ -120,6 +120,7 @@ void cfg_defaults(AppConfig& c) {
   c.invert = false; /* the E32R40T is a TN panel; IPS clones need true */
   c.bgr = true;
   c.spi80 = false;
+  c.board = 0; /* auto */
   c.audio_out = AUDIO_SPEAKER;
   c.vol_master = 70;
   c.vol_chime = 60;
@@ -194,6 +195,8 @@ static const char* const SPEED_NAMES[] = {"kmh", "mph", "kt", "ms"};
 static const char* const LABEL_NAMES[] = {"off", "nearest", "all"};
 static const char* const PCOLOR_NAMES[] = {"theme", "altitude"};
 static const char* const AUDIO_NAMES[] = {"off", "speaker", "bluetooth"};
+/* BoardId order (core/board.h) */
+static const char* const BOARD_NAMES[] = {"auto", "cyd28", "cyd28usbc", "e32r40t"};
 
 static bool parse_mac(const char* s, uint8_t out[6]) {
   unsigned v[6];
@@ -299,6 +302,7 @@ bool cfg_apply_json(AppConfig& c, const char* json, size_t len, bool keep_blank)
     get_bool(d["invert"], c.invert);
     get_bool(d["bgr"], c.bgr);
     get_bool(d["spi80"], c.spi80);
+    get_enum(d["board"], c.board, BOARD_NAMES, 4);
   }
 
   JsonObjectConst a = root["audio"];
@@ -423,6 +427,7 @@ size_t cfg_to_json(const AppConfig& c, char* out, size_t cap, bool secrets) {
   d["invert"] = c.invert;
   d["bgr"] = c.bgr;
   d["spi80"] = c.spi80;
+  d["board"] = BOARD_NAMES[c.board % 4];
 
   JsonObject a = doc["audio"].to<JsonObject>();
   a["out"] = AUDIO_NAMES[c.audio_out % 3];

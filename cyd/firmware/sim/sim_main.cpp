@@ -17,6 +17,7 @@
  *
  *   make -C cyd/firmware/sim && ./cyd/firmware/sim/build/fs_sim --out shots
  *   ./cyd/firmware/sim/build/fs_sim --landscape --out shots
+ *   ./cyd/firmware/sim/build/fs_sim --small [--landscape] --out shots   (2.8" CYD, 240x320)
  */
 
 #include <lvgl.h>
@@ -34,6 +35,7 @@
 #include "data/model.h"
 #include "data/aircraft_db.h"
 #include "ui/face.h"
+#include "ui/layouts.h"
 #include "ui/nav.h"
 #include "ui/radar.h"
 #include "ui/theme.h"
@@ -314,17 +316,23 @@ static void load_routes() {
 }
 
 int main(int argc, char** argv) {
-  bool landscape = false;
+  bool landscape = false, small = false;
   for (int i = 1; i < argc; i++) {
     if (!strcmp(argv[i], "--landscape")) landscape = true;
+    if (!strcmp(argv[i], "--small")) small = true; /* 2.8" CYD, 240x320 */
     if (!strcmp(argv[i], "--out") && i + 1 < argc) s_out = argv[++i];
   }
   mkdir(s_out, 0755);
-  if (landscape) {
-    W = 480;
+  if (small) {
+    W = 240;
     H = 320;
-    s_prefix = "l";
   }
+  if (landscape) {
+    int t = W;
+    W = H;
+    H = t;
+  }
+  s_prefix = small ? (landscape ? "sl" : "sp") : (landscape ? "l" : "p");
 
   model_init();
   cmd_init();
@@ -436,6 +444,45 @@ int main(int argc, char** argv) {
   model_push_notice(n);
   run(900);
   shot("12_alert_banner");
+  run(6000); /* banner slides away */
+
+  /* first start without Wi-Fi: the setup card with the hotspot QR code */
+  {
+    ModelGuard g;
+    g_model.net.connected = false;
+    g_model.net.ap_mode = true;
+    snprintf(g_model.net.ap_ssid, sizeof(g_model.net.ap_ssid), "FlightScnr-1A2B");
+    snprintf(g_model.net.ap_pass, sizeof(g_model.net.ap_pass), "skyward42");
+  }
+  run(1500);
+  shot("13_setup");
+  tap_label("Later");
+  run(600);
+
+  bt_sheet_open();
+  run(900);
+  shot("14_bluetooth");
+  sheet_close(lv_obj_get_child(lv_layer_top(), -1));
+  run(800);
+
+  /* complication picker: edit mode, then tap the second slot */
+  face_editor_open();
+  run(900);
+  {
+    const LayoutDef& L = layout_get(landscape ? ORIENT_LANDSCAPE : ORIENT_PORTRAIT, g_cfg.layout[landscape ? 1 : 0]);
+    const SlotDef& sd = L.slots[1];
+    tap_at(sd.x + sd.w / 2, sd.y + sd.h / 2);
+  }
+  run(900);
+  shot("15_picker");
+  sheet_close(lv_obj_get_child(lv_layer_top(), -1));
+  run(800);
+  face_editor_close();
+  run(600);
+
+  ui_start_calibration();
+  run(800);
+  shot("16_calibration");
   printf("done\n");
   return 0;
 }

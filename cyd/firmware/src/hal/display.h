@@ -17,7 +17,7 @@
 /* Bring up the panel, LVGL and the touch input device.
  * draw_lines: height of each of the two DMA draw buffers (smaller when
  * Bluetooth audio needs the RAM). */
-void display_init(uint8_t rotation, uint16_t draw_lines);
+void display_init(uint8_t rotation, uint32_t buf_bytes); /* per draw buffer (two) */
 void display_service();               /* backlight easing etc., call often */
 int display_width();
 int display_height();
