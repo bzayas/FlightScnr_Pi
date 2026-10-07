@@ -15,7 +15,7 @@
 
 ## Getting around
 
-The display has four pages side by side. Swipe left or right to move between them. A short, deliberate swipe (about an eighth of the screen) or a quick flick is enough. The dots at the bottom show where you are.
+The display has four pages side by side. Swipe left or right to move between them. A short, deliberate swipe (about a tenth of the screen) or a quick flick is enough. The dots at the bottom show where you are.
 
 ```
  Sky  ⟷  Scope  ⟷  Traffic  ⟷  Settings
@@ -30,7 +30,7 @@ The display has four pages side by side. Swipe left or right to move between the
 | Long-press the scope | Opens [Customize](#customizing-the-scope). |
 | Tap an alert banner | Opens that aircraft's flight sheet. |
 
-**Touch tips:** the screen is resistive, so it reacts to pressure rather than skin. A stylus or fingernail is the most precise. With a fingertip, press firmly. If touches land in the wrong place, recalibrate under **Settings → Calibrate touch**.
+**Touch tips:** the screen is resistive, so it reacts to pressure rather than skin. A stylus or fingernail is the most precise. With a fingertip, press firmly with the pad of your finger. A swipe decides early whether it's sideways (turn the page) or up and down (scroll), so a page swipe that drifts doesn't scroll the page instead. If touches land in the wrong place, recalibrate under **Settings → Calibrate touch**.
 
 ## The scope
 

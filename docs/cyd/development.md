@@ -87,7 +87,7 @@ sim/build/fs_sim --small --landscape --out shots # 2.8" landscape
 Besides the screenshots, it:
 
 - reports how many pixels each radar frame sends over SPI;
-- checks that short swipes and flicks turn the page;
+- checks that short swipes and flicks turn the page, with a stylus and with a simulated fingertip (a first contact that lands off target, dropped samples and sideways jitter);
 - checks that Settings' switches, segmented controls and sliders respond to taps.
 
 It exits with an error if a check fails. CI runs all four sizes.
@@ -164,6 +164,19 @@ Requests go through a small HTTP/1.0 client on plain sockets (`net/fetch.cpp`), 
 - **Drawn lists.** Traffic and Settings paint their rows in one object instead of hundreds of LVGL widgets: Settings went from 28 KB to about 1 KB. Pages are built when you swipe towards them and freed when you leave.
 - **Smooth motion** from dead reckoning: aircraft move along their heading between updates, and corrections ease in.
 - **Text by its ink.** Widgets place figures and capitals by where their ink sits in the font (`ink()` in `ui/complications.cpp`), not by the line box. Values and units share a baseline, and each widget family picks the largest arrangement that fits its slot (value and unit, value, then a short form).
+
+### Touch
+
+The XPT2046 is resistive. A stylus gives clean samples; a fingertip presses lightly over a wider area, so its first reading lands off target, samples drop out mid-swipe and the position wobbles sideways. Every sample goes through `core/touch_filter.cpp`, which the simulator runs too:
+
+- **Settle:** the first sample of a touch is dropped.
+- **Smooth:** a light IIR filter steadies jitter.
+- **Axis lock:** the pointer holds still until it has moved 8 px, then commits to one axis for the rest of the touch, leaning horizontal. A wobbly page swipe can't turn into a list scroll, and taps and long presses stay exact.
+- **Bridge:** up to five missed samples (100 ms) don't end a drag.
+
+The touch controller's pen-down line (IRQ) also blinks off under a light finger, and LovyanGFX skips samples while it's off. `Touch_CYD` in `hal/lgfx_board.h` uses the line only to detect the start of a touch; during a touch, the pressure reading alone decides. The touch SPI clock is 1 MHz, which gives the ADC time to settle on a light, high-resistance contact.
+
+A page turns once the drag has travelled a tenth of the screen width (at least 20 px), or with a flick (`pager_feedback` in `ui/ui.cpp`).
 
 ### Layouts and the full-screen radar
 

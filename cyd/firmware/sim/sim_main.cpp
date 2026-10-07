@@ -30,6 +30,7 @@
 #include "core/commands.h"
 #include "core/config.h"
 #include "core/platform.h"
+#include "core/touch_filter.h"
 #include "data/feeds.h"
 #include "data/geo.h"
 #include "data/model.h"
@@ -61,7 +62,9 @@ static const char* s_prefix = "p";
 static struct {
   int x, y;
   bool pressed;
+  bool finger; /* sample like a fingertip on a resistive panel */
 } s_touch;
+static TouchFilter s_tf;
 
 static void flush_cb(lv_disp_drv_t* d, const lv_area_t* a, lv_color_t* px) {
   int w = a->x2 - a->x1 + 1;
@@ -72,10 +75,29 @@ static void flush_cb(lv_disp_drv_t* d, const lv_area_t* a, lv_color_t* px) {
   lv_disp_flush_ready(d);
 }
 
+/* Every touch goes through the device's touch filter. A "finger" also
+ * jitters by a few pixels, lands its first sample off target while the
+ * contact forms, and drops every third sample, as fingertips do on the
+ * resistive panel. */
 static void touch_cb(lv_indev_drv_t*, lv_indev_data_t* data) {
-  data->point.x = s_touch.x;
-  data->point.y = s_touch.y;
-  data->state = s_touch.pressed ? LV_INDEV_STATE_PR : LV_INDEV_STATE_REL;
+  static uint32_t rng = 12345, n;
+  auto jitter = [&](int a) {
+    rng = rng * 1103515245u + 12345u;
+    return (int)((rng >> 16) % (2 * a + 1)) - a;
+  };
+  bool got = s_touch.pressed;
+  float x = (float)s_touch.x, y = (float)s_touch.y;
+  if (got && s_touch.finger) {
+    if (!s_tf.active && !s_tf.settling) y += 10; /* the first contact lands low */
+    if (++n % 3 == 0) got = false;
+    x += jitter(3);
+    y += jitter(3);
+  }
+  int32_t ox, oy;
+  bool pressed = touch_filter_step(s_tf, got, x, y, &ox, &oy);
+  data->point.x = (lv_coord_t)ox;
+  data->point.y = (lv_coord_t)oy;
+  data->state = pressed ? LV_INDEV_STATE_PR : LV_INDEV_STATE_REL;
 }
 
 static uint32_t diff_mask(const AppConfig& a, const AppConfig& b) {
@@ -142,7 +164,7 @@ static lv_obj_t* find_label(lv_obj_t* o, const char* text) {
 }
 
 static void tap_at(int x, int y) {
-  s_touch = {x, y, true};
+  s_touch = {x, y, true, false};
   run(80);
   s_touch.pressed = false;
   run(120);
@@ -164,10 +186,24 @@ static bool tap_label(const char* text) {
 /* A resistive-panel swipe: the finger moves `dx` in a few steps, rests,
  * then lifts, so LVGL sees no speed at release. */
 static void swipe(int x0, int dx, int y) {
-  s_touch = {x0, y, true};
+  s_touch = {x0, y, true, s_touch.finger};
   run(48);
   for (int i = 1; i <= 6; i++) {
     s_touch.x = x0 + dx * i / 6;
+    run(32);
+  }
+  run(96);
+  s_touch.pressed = false;
+  run(800);
+}
+
+/* A swipe that also moves dy vertically, in steps. */
+static void finger_swipe_diag(int x0, int dx, int y, int dy) {
+  s_touch = {x0, y, true, s_touch.finger};
+  run(48);
+  for (int i = 1; i <= 6; i++) {
+    s_touch.x = x0 + dx * i / 6;
+    s_touch.y = y + dy * i / 6;
     run(32);
   }
   run(96);
@@ -203,6 +239,35 @@ static int check_swipes() {
   expect("Sky is the first page", PAGE_SKY);
   swipe(W * 7 / 8, -W * 3 / 4, y);
   expect("a long swipe from Sky moves one page only", PAGE_FACE);
+
+  /* a fingertip: jitter, a first sample off target, dropped samples, and a
+   * drag that wanders vertically as much as a thumb does */
+  s_touch.finger = true;
+  swipe(W * 2 / 3, -step, y);
+  expect("finger: a short swipe left goes to Traffic", PAGE_TRAFFIC);
+  swipe(W / 3, step, y);
+  swipe(W / 3, step, y);
+  expect("finger: two swipes right reach Sky", PAGE_SKY);
+  /* Sky scrolls vertically too: a sideways swipe that wanders must still page */
+  finger_swipe_diag(W * 2 / 3, -step, y, step / 2);
+  expect("finger: on Sky, a swipe drifting down pages", PAGE_FACE);
+  swipe(W / 3, step, y);
+  finger_swipe_diag(W * 2 / 3, -step, y, -step / 2);
+  expect("finger: on Sky, a swipe drifting up pages", PAGE_FACE);
+  /* ...and a vertical drag scrolls the list instead */
+  nav_goto(PAGE_SKY, false);
+  run(300);
+  lv_obj_t* sky = lv_obj_get_child(lv_obj_get_child(lv_obj_get_child(lv_scr_act(), 0), PAGE_SKY), 0);
+  lv_obj_scroll_to_y(sky, 0, LV_ANIM_OFF);
+  finger_swipe_diag(W / 2, W / 20, H * 3 / 4, -H / 3);
+  bool scrolled = lv_obj_get_scroll_y(sky) > 20;
+  printf("  swipe: %-44s %s (scrolled %d px)\n", "finger: a vertical drag on Sky scrolls it",
+         scrolled && nav_current() == PAGE_SKY ? "ok" : "FAIL", (int)lv_obj_get_scroll_y(sky));
+  if (!scrolled || nav_current() != PAGE_SKY) fails++;
+  lv_obj_scroll_to_y(sky, 0, LV_ANIM_OFF);
+  nav_goto(PAGE_FACE, false);
+  run(300);
+  s_touch.finger = false;
   return fails;
 }
 
@@ -247,7 +312,7 @@ static int check_settings() {
   ok("tap a value row cycles it", g_cfg.labels == (labels + 1) % 3);
   show("Day", &a);
   int y = (a.y1 + a.y2) / 2;
-  s_touch = {a.x2 - 4, y, true};
+  s_touch = {a.x2 - 4, y, true, false};
   run(64);
   for (int x = a.x2 - 4; x >= a.x1 - 12; x -= 6) { /* past the end: it clamps */
     s_touch.x = x;
@@ -777,9 +842,12 @@ int main(int argc, char** argv) {
     lv_obj_scroll_to_y(page, H * 9 / 10, LV_ANIM_OFF);
     run(300);
     shot("08b_sky_sun");
+    lv_obj_scroll_to_y(page, H * 18 / 10, LV_ANIM_OFF);
+    run(300);
+    shot("08c_sky_moon");
     lv_obj_scroll_to_y(page, LV_COORD_MAX, LV_ANIM_OFF);
     run(300);
-    shot("08c_sky_end");
+    shot("08d_sky_end");
     lv_obj_scroll_to_y(page, 0, LV_ANIM_OFF);
     run(200);
   }

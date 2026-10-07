@@ -361,7 +361,20 @@ void sky_tick() {
   for (auto c : s_cards)
     if (c) lv_obj_invalidate(c);
   /* attribution required by the providers' terms */
-  lv_label_set_text(s_attrib, prov == WX_TOMORROW ? "Powered by Tomorrow.io"
-                              : prov == WX_OPENMETEO ? "Weather data by Open-Meteo.com (CC BY 4.0)"
-                                                     : "");
+  const char* credit = prov == WX_TOMORROW ? "Powered by Tomorrow.io"
+                       : prov == WX_OPENMETEO ? "Weather data by Open-Meteo.com (CC BY 4.0)"
+                                              : "";
+  if (prov == WX_OPENMETEO) { /* break between phrases, never inside a name */
+    static const char* const forms[] = {"Weather data by Open-Meteo.com (CC BY 4.0)",
+                                        "Weather data by Open-Meteo.com\n(CC BY 4.0)",
+                                        "Weather data by\nOpen-Meteo.com (CC BY 4.0)"};
+    lv_coord_t ls = lv_obj_get_style_text_letter_space(s_attrib, 0), w = lv_obj_get_content_width(s_page);
+    for (const char* f : forms) {
+      lv_point_t sz;
+      lv_txt_get_size(&sz, f, &fs_text_12, ls, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
+      credit = f;
+      if (sz.x <= w) break;
+    }
+  }
+  lv_label_set_text(s_attrib, credit);
 }

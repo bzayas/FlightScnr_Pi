@@ -19,6 +19,25 @@
 
 #include "core/board.h"
 
+/* The XPT2046's pen-down line (IRQ) blinks off under a light fingertip, and
+ * LovyanGFX skips any sample taken while it's off, which cut finger swipes
+ * short. Here the line only gates the start of a touch (no SPI traffic while
+ * idle); once a touch is in progress every sample is read, and the pressure
+ * reading alone decides. */
+extern volatile bool g_touch_in_progress;
+
+class Touch_CYD : public lgfx::Touch_XPT2046 {
+ public:
+  uint_fast8_t getTouchRaw(lgfx::touch_point_t* tp, uint_fast8_t count) override {
+    if (!g_touch_in_progress) return lgfx::Touch_XPT2046::getTouchRaw(tp, count);
+    int16_t irq = _cfg.pin_int;
+    _cfg.pin_int = -1;
+    uint_fast8_t n = lgfx::Touch_XPT2046::getTouchRaw(tp, count);
+    _cfg.pin_int = irq;
+    return n;
+  }
+};
+
 class LGFX_Board : public lgfx::LGFX_Device {
  public:
   lgfx::Panel_ILI9341 ili9341;
@@ -26,7 +45,7 @@ class LGFX_Board : public lgfx::LGFX_Device {
   lgfx::Panel_ST7796 st7796;
   lgfx::Bus_SPI bus;
   lgfx::Light_PWM light;
-  lgfx::Touch_XPT2046 touch;
+  Touch_CYD touch;
 
   void configure(const BoardDef& b, bool spi80, bool invert, bool bgr) {
     lgfx::Panel_LCD* panel = b.panel == PANEL_ST7796 ? (lgfx::Panel_LCD*)&st7796
@@ -89,7 +108,9 @@ class LGFX_Board : public lgfx::LGFX_Device {
       cfg.offset_rotation = 0;
       /* 2.8" CYD: touch has its own pins, on the otherwise unused VSPI */
       cfg.spi_host = b.touch_shared ? SPI2_HOST : SPI3_HOST;
-      cfg.freq = 2500000;
+      /* a light fingertip makes a high-resistance contact; a slower clock gives
+       * the ADC time to settle on it (a stylus reads cleanly either way) */
+      cfg.freq = 1000000;
       cfg.pin_sclk = b.t_sck;
       cfg.pin_mosi = b.t_mosi;
       cfg.pin_miso = b.t_miso;
