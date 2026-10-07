@@ -92,6 +92,14 @@ Besides the screenshots, it:
 
 It exits with an error if a check fails. CI runs all four sizes.
 
+For design work, `--gallery` renders every widget at every slot size the layouts use (both screen sizes, both orientations, day and night), and every glyph at five sizes, each with and without alignment guides:
+
+```bash
+sim/build/fs_sim --gallery --out gallery   # g_<theme>_<family>[_guides].ppm, plus g_cells.tsv
+```
+
+`g_cells.tsv` lists where each cell is, so a script can measure how far a glyph's ink sits from the centre of its box. Glyphs are kept centred within about 2% of their size.
+
 The screenshots in this guide and on the installer page come from the simulator:
 
 ```bash
@@ -152,9 +160,10 @@ Requests go through a small HTTP/1.0 client on plain sockets (`net/fetch.cpp`), 
 
 - **Two DMA buffers** of 16 lines each: LVGL renders the next band while the previous one goes out over SPI.
 - **A small anti-aliased rasterizer** (`ui/fx.cpp`) draws the radar, icons and gauges straight into LVGL's buffer: discs, rings, arcs, capsules, polygons, and rotated, filtered icon masks.
-- **Only what changed is redrawn.** Each aircraft, tag and the sweep wedge has its own dirty rectangle; a steady radar frame sends about 25–28 thousand pixels, roughly 10 ms of SPI.
+- **Only what changed is redrawn.** Each aircraft, tag and the sweep wedge has its own dirty rectangle; a steady radar frame sends about 15–28 thousand pixels (6–10 ms of SPI), depending on how many aircraft and tags are moving.
 - **Drawn lists.** Traffic and Settings paint their rows in one object instead of hundreds of LVGL widgets: Settings went from 28 KB to about 1 KB. Pages are built when you swipe towards them and freed when you leave.
 - **Smooth motion** from dead reckoning: aircraft move along their heading between updates, and corrections ease in.
+- **Text by its ink.** Widgets place figures and capitals by where their ink sits in the font (`ink()` in `ui/complications.cpp`), not by the line box. Values and units share a baseline, and each widget family picks the largest arrangement that fits its slot (value and unit, value, then a short form).
 
 ### Layouts and the full-screen radar
 

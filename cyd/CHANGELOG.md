@@ -13,6 +13,31 @@
 
 Versions are `year.month.day.iteration`. The version you're running is under **Settings → About** on the display.
 
+## 2026.10.7.7
+
+A design pass over every widget, glyph and card, measured in a new simulator gallery rather than judged by eye.
+
+- **Text sits where it should.** Figures and capitals are now placed by their actual ink instead of the font's line box. The large numeral fonts used to sit 3–6 px high. Values and their units ("13 mph", "9:40 PM") share one baseline, the small PM lines up with the tops of the big time's figures, and temperatures centre on their digits with the degree sign hanging.
+- **Calendar widget:** weekday and date are centred as a pair at every size.
+- **Circular widgets:** glyph and value are centred as one group. Values never run past the circle: a short form ("39k", "11h") or the glyph alone takes over, and AM/PM is left out. Gauges put the low/high pair in the opening only when it fits, otherwise a glyph. The Sunrise & Sunset dial was redrawn: the sun's path above the horizon, the next sunrise or sunset under it. Small wind dials drop the unit and use fewer ticks so the pointer never touches the figures.
+- **Corner widgets** pick the most informative arrangement that fits (glyph, value and unit, then less), right-align on right-hand corners, and use short captions ("TEMP", "QUAKE") instead of cutting words off.
+- **Cards** (rectangular slots) have one rhythm of caption, value and detail line, centred vertically. Detail text no longer runs under the picture, and the hourly forecast and the solar chart no longer overlap themselves in short cards. The hero slot shows other widgets as cards when it is small.
+- **Inline widgets** share one baseline across the value and the grey text, and are centred as a group. The inline date reads "Tuesday  October 6".
+- **Glyphs:**
+  - sunrise, sunset and daylight are centred on their ink and stay legible under 20 px;
+  - the sun-behind-cloud icons are centred as a whole;
+  - the clear-night crescent matches the sun's size;
+  - the lightning bolt is one shape instead of two disconnected pieces.
+- **Sky page:**
+  - the 4-day forecast columns size themselves to their text, so the icons no longer cover the low temperatures;
+  - sunrise and sunset are two matching columns, with first and last light under them (dawn and dusk on the 2.8″ screen) and the day length in the caption row;
+  - the four detail gauges become a 2×2 grid on the 2.8″ portrait screen;
+  - the moon and earthquake cards fit their text.
+- **Radar:** aircraft tags no longer cover the compass letters or the ring distances.
+- **Flight sheet:** the plane on the route bar stays inside the card, and the heading compass sits beside the heading.
+- **Alert banner:** the detail stays on one line.
+- Widget titles use their own colour; weather and forecast titles are no longer the radar accent green. Cards no longer repeat the date ("October 6 · Oct 6").
+
 ## 2026.10.7.6
 
 - **Full-screen radar.** A new scope layout, *Full screen*, gives the whole screen to the radar, with no widgets. Range rings run out to the corners, compass letters sit on the edges, and aircraft beyond the screen are pinned to its edge. A wider area is fetched to fill the corners.

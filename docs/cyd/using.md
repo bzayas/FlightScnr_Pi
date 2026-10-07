@@ -172,6 +172,11 @@ The bottom of the page credits the weather source in use.
 
 <br clear="right">
 
+<p>
+  <img src="images/sky-sun.png" width="160" alt="The Sky page: 4-day forecast and the sun's path">
+  <img src="images/sky-details.png" width="160" alt="The Sky page: wind, humidity, UV and earthquake details">
+</p>
+
 ## Traffic
 
 <img src="images/traffic.png" width="180" align="right" alt="The Traffic list, nearest first">

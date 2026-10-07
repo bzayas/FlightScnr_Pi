@@ -56,6 +56,8 @@ GUIDE = {
     "widget-picker": "sp_15_picker",
     "flight-sheet": "sp_07_flight_detail",
     "sky": "sp_08_sky",
+    "sky-sun": "sp_08b_sky_sun",
+    "sky-details": "sp_08c_sky_end",
     "traffic": "sp_09_traffic",
     "settings": "sp_10_settings",
     "settings-radar": "sp_10b_settings_more",

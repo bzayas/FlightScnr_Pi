@@ -20,7 +20,7 @@ float temp_disp(float c);            /* to configured unit */
 void fmt_temp(float c, char* out, size_t n);         /* "72°" */
 void fmt_temp_unit(float c, char* out, size_t n);    /* "72°F" */
 void fmt_alt(int32_t ft, char* out, size_t n);       /* "12,345ft" (Pi tag format) */
-void fmt_alt_short(int32_t ft, char* out, size_t n); /* "12.3k" */
+void fmt_alt_short(int32_t ft, char* out, size_t n); /* "39k", "4.2k" */
 float dist_from_nm(float nm);
 const char* dist_unit();
 void fmt_dist(float nm, char* out, size_t n);        /* "4.2 mi" */
