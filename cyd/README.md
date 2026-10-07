@@ -136,7 +136,11 @@ The free plan allows 500 calls a day and 25 an hour. FlightScnr uses about 120 a
 1. On the installer's **Install** page, open **Device log** with the board plugged in. It restarts the board and shows everything it prints, and explains brownouts (weak USB power) and crashes in plain words.
 2. Flash the **display test** to separate hardware from software. Get `flightscnr-cyd-display-test-<version>.bin` from the *flightscnr-cyd-display-test* CI artifact, or build it with `pio run -e cyd-display-test && python3 tools/package_firmware.py --display-test out/`. Then choose *Use a different file…* and *Firmware only*; your settings stay.
 
-   The test lights the backlight, cycles the RGB LED, reads the panel ID, fills red, green, blue and white, and echoes touches, logging every step. Reinstall FlightScnr afterwards.
+   Watch the screen while it runs. The test cycles the RGB LED, then turns the backlight pin (IO27) on for 3 seconds, then IO21 (used by some other boards) for 3 seconds. It reads the panel's ID and power state, then changes the screen to red, green, blue and white every second, and echoes touches. Every step is logged. If the screen never glows, not even faintly, during either backlight step, the backlight isn't getting power. That usually means a hardware fault, so contact the seller. Reinstall FlightScnr afterwards.
+
+### Device page stuck on "Connecting to the display"?
+
+That page comes from the display itself, which is short on memory (see [Memory](#memory)). Reload after a few seconds. The **Device log** shows a `[mem]` line every minute or so with the free memory.
 
 ### Manual flashing
 
@@ -167,11 +171,19 @@ Limitations:
 - Wi-Fi and Bluetooth share one radio, so streaming LiveATC over Bluetooth on a weak Wi-Fi signal can stutter.
 - LiveATC streams are for personal listening only, per LiveATC.net's terms.
 
+## Memory
+
+The ESP32 has no PSRAM: Wi-Fi, the screen and everything else share about 190 KB. To stay within that:
+
+- HTTPS needs about 60 KB free. When that isn't available, HTTPS-only sources are skipped: adsb.fi, airplanes.live and Tomorrow.io. Flights then come from adsb.lol, and weather from Open-Meteo, both over plain HTTP. Your Tomorrow.io key is never sent over plain HTTP.
+- Sounds borrow about 50 KB while they play, and give it back afterwards. A sound that wouldn't fit is skipped, and the portal's status page says so. It is never allowed to crash the display.
+- The device logs its free memory (`[mem]` lines) at start-up, then every minute for the first five minutes, then every ten.
+
 ## Performance and polish
 
 Tricks used to make a small TN panel feel smooth:
 
-- **Two DMA buffers.** LVGL renders the next band while the previous one is still going out over SPI. SPI runs at 40 MHz, with an optional 80 MHz mode.
+- **Two DMA buffers** of 16 lines each. LVGL renders the next band while the previous one is still going out over SPI. SPI runs at 40 MHz, with an optional 80 MHz mode.
 - **A direct rasterizer.** The radar, glyphs and gauges are drawn by a small anti-aliased rasterizer straight into LVGL's buffer, with no alpha layers. It handles discs, rings, arcs, capsules, convex polygons, and rotated, bilinear-filtered icon masks.
 - **Only changed pixels are pushed.** Dirty rectangles are tracked per aircraft, per tag and for the sweep wedge. A steady radar frame pushes about 25–28k pixels, roughly 10 ms of SPI.
 - **Smooth motion without extra data.** Aircraft positions are dead-reckoned, and corrections ease out over about 0.9 s. A precomputed table drives the sweep trail.

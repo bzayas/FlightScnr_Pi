@@ -22,8 +22,12 @@
 #include <HTTPClient.h>
 #include <WiFi.h>
 #include <driver/i2s.h>
+#include <esp_heap_caps.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/queue.h>
+#include <freertos/semphr.h>
+
+#include <new>
 
 #include "bt_a2dp.h"
 #include "core/board.h"
@@ -37,8 +41,20 @@
 #include "minimp3/minimp3.h"
 
 #define OUT_HZ 44100
-#define BLOCK 512 /* frames per mix block (~11.6 ms) */
+#define BLOCK 256 /* frames per mix block (~5.8 ms) */
 #define STREAM_BUF 4096
+
+/* The board has no PSRAM, so audio borrows its RAM only while it plays:
+ * the task (minimp3 keeps ~16 KB of scratch on its stack), the mix buffers,
+ * a decoder per clip and the speaker's DMA buffers come to ~50 KB. HEADROOM
+ * is what must stay free for the screen and Wi-Fi; a sound that would eat
+ * into it is skipped, never allowed to crash the display. */
+#define AUDIO_STACK 24576
+#define AUDIO_TASK_BYTES (AUDIO_STACK + BLOCK * 16)
+#define AUDIO_SOURCE_BYTES (sizeof(Mp3Source) + 512)
+#define AUDIO_SPEAKER_BYTES 7168
+#define AUDIO_HEADROOM (16 * 1024)
+#define AUDIO_IDLE_EXIT_MS 8000
 
 bool g_bt_mem_kept;  /* set in main from btInUse() */
 bool g_bt_mem_short; /* Bluetooth wanted, but its RAM was given back to keep Wi-Fi alive */
@@ -78,8 +94,8 @@ struct Mp3Source {
   }
 
   bool open_stream(const char* url) {
-    client = new WiFiClient();
-    http = new HTTPClient();
+    client = new (std::nothrow) WiFiClient();
+    http = new (std::nothrow) HTTPClient();
     in = (uint8_t*)malloc(STREAM_BUF);
     if (!client || !http || !in) return false;
     http->useHTTP10(true);
@@ -199,9 +215,17 @@ struct Mp3Source {
 static bool s_i2s_ready;
 static bool s_amp_on;
 static uint32_t s_last_audio_ms;
+static uint16_t* s_spk_buf;
+
+/* `total` more bytes fit with HEADROOM to spare, `block` of them in one piece. */
+static bool mem_ok(size_t total, size_t block) {
+  return heap_caps_get_free_size(MALLOC_CAP_8BIT) >= total + AUDIO_HEADROOM &&
+         heap_caps_get_largest_free_block(MALLOC_CAP_8BIT) >= block;
+}
 
 static void speaker_begin() {
   if (s_i2s_ready) return;
+  if (!mem_ok(AUDIO_SPEAKER_BYTES, 2048)) return;
   i2s_config_t cfg = {};
   cfg.mode = (i2s_mode_t)(I2S_MODE_MASTER | I2S_MODE_TX | I2S_MODE_DAC_BUILT_IN);
   cfg.sample_rate = OUT_HZ;
@@ -213,6 +237,11 @@ static void speaker_begin() {
   cfg.dma_buf_len = 256;
   cfg.use_apll = false;
   if (i2s_driver_install(I2S_NUM_0, &cfg, 0, nullptr) != ESP_OK) return;
+  s_spk_buf = (uint16_t*)malloc(BLOCK * 2 * sizeof(uint16_t));
+  if (!s_spk_buf) {
+    i2s_driver_uninstall(I2S_NUM_0);
+    return;
+  }
   i2s_set_dac_mode(I2S_DAC_CHANNEL_LEFT_EN); /* DAC2 = GPIO26 */
   i2s_zero_dma_buffer(I2S_NUM_0);
   pinMode(PIN_AUDIO_EN, OUTPUT);
@@ -223,16 +252,25 @@ static void speaker_begin() {
 static void speaker_amp(bool on) {
   if (on == s_amp_on) return;
   s_amp_on = on;
-  if (!on) i2s_zero_dma_buffer(I2S_NUM_0);
+  if (!on && s_i2s_ready) i2s_zero_dma_buffer(I2S_NUM_0);
   digitalWrite(PIN_AUDIO_EN, on ? LOW : HIGH);
+}
+
+/* Give the driver's DMA buffers back while nothing plays. */
+static void speaker_end() {
+  speaker_amp(false);
+  if (!s_i2s_ready) return;
+  i2s_driver_uninstall(I2S_NUM_0);
+  free(s_spk_buf);
+  s_spk_buf = nullptr;
+  s_i2s_ready = false;
 }
 
 static void speaker_write(const int16_t* stereo, int frames) {
   speaker_begin();
   if (!s_i2s_ready) return;
   speaker_amp(true);
-  static uint16_t* buf = (uint16_t*)malloc(BLOCK * 2 * sizeof(uint16_t));
-  if (!buf) return;
+  uint16_t* buf = s_spk_buf;
   for (int i = 0; i < frames; i++) {
     /* 8-bit built-in DAC takes the high byte of an offset-binary sample. */
     int32_t m = ((int32_t)stereo[2 * i] + stereo[2 * i + 1]) / 2;
@@ -277,6 +315,7 @@ struct AudioCmd {
 
 static QueueHandle_t s_q;
 static TaskHandle_t s_task;
+static SemaphoreHandle_t s_life; /* task start (post) vs. its idle exit */
 static Mp3Source* s_clip;
 static uint8_t s_clip_channel;
 static Mp3Source* s_atc;
@@ -304,7 +343,13 @@ static void atc_open() {
   delete s_atc;
   s_atc = nullptr;
   if (!g_cfg.atc_mount[0] || WiFi.status() != WL_CONNECTED) return;
-  s_atc = new Mp3Source();
+  /* + the stream's socket buffer and HTTP client */
+  if (mem_ok(AUDIO_SOURCE_BYTES + STREAM_BUF + 8192, sizeof(Mp3Source))) s_atc = new (std::nothrow) Mp3Source();
+  if (!s_atc) {
+    snprintf(s_err, sizeof(s_err), "Not enough memory for LiveATC");
+    s_atc_retry_ms = millis() + 30000;
+    return;
+  }
   char url[96];
   snprintf(url, sizeof(url), "http://d.liveatc.net/%s", g_cfg.atc_mount);
   s_atc_buffering = true;
@@ -323,8 +368,13 @@ static void handle_cmd(const AudioCmd& c) {
     case ACMD_PLAY: {
       if (c.arg >= SND_COUNT) break;
       delete s_clip;
-      s_clip = new Mp3Source();
-      if (!s_clip) break;
+      s_clip = mem_ok(AUDIO_SOURCE_BYTES, sizeof(Mp3Source)) ? new (std::nothrow) Mp3Source() : nullptr;
+      if (!s_clip) {
+        snprintf(s_err, sizeof(s_err), "Sound skipped: not enough memory");
+        Serial.println("[audio] sound skipped: not enough memory");
+        break;
+      }
+      if (!s_atc_want) s_err[0] = 0;
       s_clip->mem = SOUND_CLIPS[c.arg].data;
       s_clip->mem_len = SOUND_CLIPS[c.arg].len;
       s_clip_channel = c.channel;
@@ -351,13 +401,37 @@ static void handle_cmd(const AudioCmd& c) {
 
 static inline int16_t sat16(int32_t v) { return (int16_t)(v > 32767 ? 32767 : (v < -32768 ? -32768 : v)); }
 
+/* Ends the task once nothing has played for a while, handing its stack and
+ * buffers back. Bluetooth and LiveATC keep it running. */
+static bool idle_exit(int16_t* mix, int16_t* tmp, int32_t* acc, bool force) {
+  if (!force && (bt_running() || s_atc_want || s_clip || s_atc || millis() - s_last_audio_ms < AUDIO_IDLE_EXIT_MS))
+    return false;
+  xSemaphoreTake(s_life, portMAX_DELAY);
+  if (force) {
+    xQueueReset(s_q); /* can't play these */
+  } else if (uxQueueMessagesWaiting(s_q)) {
+    xSemaphoreGive(s_life);
+    return false;
+  }
+  speaker_end();
+  free(mix);
+  free(tmp);
+  free(acc);
+  s_level = 0;
+  s_task = nullptr;
+  xSemaphoreGive(s_life);
+  return true;
+}
+
 static void audio_task(void*) {
   /* Heap, not .bss: users who never play audio don't pay for these. */
   int16_t* mix = (int16_t*)malloc(BLOCK * 2 * sizeof(int16_t));
   int16_t* tmp = (int16_t*)malloc(BLOCK * 2 * sizeof(int16_t));
   int32_t* acc = (int32_t*)malloc(BLOCK * 2 * sizeof(int32_t));
+  s_last_audio_ms = millis();
   if (!mix || !tmp || !acc) {
     Serial.println("[audio] out of memory");
+    idle_exit(mix, tmp, acc, true);
     vTaskDelete(nullptr);
   }
   for (;;) {
@@ -377,6 +451,7 @@ static void audio_task(void*) {
     if (!s_clip && !(s_atc && s_atc_want)) {
       s_level = 0;
       if (s_amp_on && millis() - s_last_audio_ms > 600) speaker_amp(false);
+      if (idle_exit(mix, tmp, acc, false)) vTaskDelete(nullptr);
       continue;
     }
 
@@ -427,21 +502,35 @@ static void audio_task(void*) {
   }
 }
 
-static void ensure_task() {
-  /* Created on first use; minimp3 keeps ~16 KB of scratch on the stack. */
-  if (!s_task) xTaskCreatePinnedToCore(audio_task, "audio", 24576, nullptr, 5, &s_task, 0);
+/* Call with s_life held. Started on demand, only when the task and what it
+ * will play fit (see AUDIO_HEADROOM). */
+static bool ensure_task() {
+  if (s_task) return true;
+  if (!mem_ok(AUDIO_TASK_BYTES + AUDIO_SOURCE_BYTES + AUDIO_SPEAKER_BYTES, AUDIO_STACK)) {
+    snprintf(s_err, sizeof(s_err), "Sound skipped: not enough memory");
+    Serial.println("[audio] not enough memory to start audio");
+    return false;
+  }
+  if (xTaskCreatePinnedToCore(audio_task, "audio", AUDIO_STACK, nullptr, 5, &s_task, 0) != pdPASS) s_task = nullptr;
+  return s_task != nullptr;
 }
 
 static void post(const AudioCmd& c) {
   if (!s_q) return;
-  ensure_task();
-  xQueueSend(s_q, &c, pdMS_TO_TICKS(20));
+  xSemaphoreTake(s_life, portMAX_DELAY);
+  if (ensure_task()) xQueueSend(s_q, &c, pdMS_TO_TICKS(20));
+  xSemaphoreGive(s_life);
 }
 
 void audio_init() {
   s_q = xQueueCreate(8, sizeof(AudioCmd));
+  s_life = xSemaphoreCreateMutex();
   audio_apply_config();
-  if (bt_running()) ensure_task(); /* runs reconnect + idle-suspend timers */
+  if (bt_running()) { /* the task runs Bluetooth's reconnect + idle-suspend timers */
+    xSemaphoreTake(s_life, portMAX_DELAY);
+    ensure_task();
+    xSemaphoreGive(s_life);
+  }
 }
 
 void audio_apply_config() {
@@ -450,7 +539,7 @@ void audio_apply_config() {
       if (g_cfg.bt_has_mac) bt_set_autoconnect(g_cfg.bt_mac);
     }
   }
-  if (g_cfg.audio_out == AUDIO_SPEAKER) speaker_begin();
+  /* The speaker's driver starts with the first sound (see speaker_write). */
 }
 
 void audio_play(SoundId id, AudioChannel channel) {

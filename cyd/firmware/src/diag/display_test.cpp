@@ -46,14 +46,16 @@ static void led(bool r, bool g, bool b) { /* common anode: LOW = on */
   digitalWrite(PIN_LED_B, b ? LOW : HIGH);
 }
 
-static void banner(uint16_t bg, uint16_t fg, const char* name) {
-  lcd.fillScreen(bg);
-  lcd.setTextColor(fg);
-  lcd.setTextDatum(lgfx::middle_center);
-  lcd.setFont(&fonts::FreeSansBold18pt7b);
-  lcd.drawString(name, lcd.width() / 2, lcd.height() / 2);
-  Serial.printf("[test] screen: %s\n", name);
-  delay(700);
+
+/* Hold a pin high for a while so a person can see whether the screen glows. */
+static void backlight_probe(int pin, const char* note) {
+  pinMode(pin, OUTPUT);
+  Serial.printf("[test] backlight probe: IO%d ON for 3 s %s -> did the screen glow?\n", pin, note);
+  digitalWrite(pin, HIGH);
+  delay(3000);
+  digitalWrite(pin, LOW);
+  Serial.printf("[test] backlight probe: IO%d OFF\n", pin);
+  delay(1000);
 }
 
 void setup() {
@@ -63,65 +65,70 @@ void setup() {
   Serial.printf("[test] last reset: %s\n", reset_reason());
   Serial.printf("[test] chip %s rev %d, %u MHz, flash %u KB, free heap %u\n", ESP.getChipModel(), ESP.getChipRevision(),
                 (unsigned)ESP.getCpuFreqMHz(), (unsigned)(ESP.getFlashChipSize() / 1024), (unsigned)ESP.getFreeHeap());
+  Serial.println("[test] WATCH THE SCREEN for the next 10 seconds.");
 
-  /* 1. Backlight on, before any display code runs. */
-  pinMode(PIN_LCD_BL, OUTPUT);
-  digitalWrite(PIN_LCD_BL, HIGH);
-  Serial.println("[test] 1/5 backlight pin IO27 set HIGH: the screen should glow now (even if black)");
-
-  /* 2. RGB LED: red, green, blue. */
+  /* 1. RGB LED: proves this firmware runs and the log matches what you see. */
   for (int pin : {PIN_LED_R, PIN_LED_G, PIN_LED_B}) pinMode(pin, OUTPUT);
   led(1, 0, 0);
-  delay(300);
+  delay(400);
   led(0, 1, 0);
-  delay(300);
+  delay(400);
   led(0, 0, 1);
-  delay(300);
+  delay(400);
   led(0, 0, 0);
-  Serial.println("[test] 2/5 RGB LED cycled red, green, blue");
+  Serial.println("[test] 1/5 RGB LED cycled red, green, blue (on the back of the board)");
 
-  /* 3. Panel init + ID. */
+  /* 2. Backlight, by hand: the documented pin, then the one other 320x480
+   *    ESP32 boards use. IO21 is a spare header pin on the E32R40T. */
+  backlight_probe(PIN_LCD_BL, "(LCDWiki: this board's backlight)");
+  backlight_probe(21, "(used by some other CYD variants)");
+  pinMode(PIN_LCD_BL, OUTPUT);
+  digitalWrite(PIN_LCD_BL, HIGH);
+  Serial.println("[test] 2/5 backlight IO27 left ON");
+
+  /* 3. Panel init + identity registers (all zero = the panel never answered,
+   *    or this board doesn't wire the panel's read line). */
   lcd.configure(false, false, true);
   bool ok = lcd.init();
-  Serial.printf("[test] 3/5 lcd.init() %s\n", ok ? "ok" : "FAILED");
-  uint32_t id = lcd.panel.readCommand(0x04, 1, 3);
-  Serial.printf("[test]     display ID (RDDID 04h): %06lX %s\n", (unsigned long)id,
-                id == 0 || id == 0xFFFFFF ? "(no answer: check the display connection)" : "");
   lcd.setBrightness(255);
+  uint32_t id = lcd.panel.readCommand(0x04, 1, 3);  /* RDDID */
+  uint32_t id4 = lcd.panel.readCommand(0xD3, 1, 3); /* ID4: ST7796S = 0x007796 */
+  uint32_t pwr = lcd.panel.readCommand(0x0A, 1, 1); /* power mode: 0x9C when awake */
+  Serial.printf("[test] 3/5 lcd.init() %s, RDDID %06lX, ID4 %06lX%s, power mode %02lX%s\n", ok ? "ok" : "FAILED",
+                (unsigned long)id, (unsigned long)id4, (id4 & 0xFFFF) == 0x7796 ? " (ST7796 answered)" : "",
+                (unsigned long)(pwr & 0xFF), (pwr & 0xFF) == 0x9C ? " (awake, display on)" : "");
 
-  /* 4. Colour fills. */
-  banner(TFT_RED, TFT_WHITE, "RED");
-  banner(TFT_GREEN, TFT_BLACK, "GREEN");
-  banner(TFT_BLUE, TFT_WHITE, "BLUE");
-  banner(TFT_WHITE, TFT_BLACK, "WHITE");
-  Serial.println("[test] 4/5 colour fills done");
-
-  /* 5. Result screen. */
-  lcd.fillScreen(TFT_BLACK);
-  lcd.setTextColor(TFT_GREEN);
-  lcd.setFont(&fonts::FreeSansBold12pt7b);
-  lcd.drawString("Display works", lcd.width() / 2, 60);
-  lcd.setFont(&fonts::Font2);
-  lcd.setTextColor(TFT_WHITE);
-  lcd.drawString("Touch the screen to test touch", lcd.width() / 2, 100);
-  lcd.drawString("Then reinstall FlightScnr", lcd.width() / 2, 124);
-  Serial.println("[test] 5/5 done. Touch the screen: raw touch values print below");
+  Serial.println("[test] 4/5 cycling RED, GREEN, BLUE, WHITE every second from now on");
+  Serial.println("[test] 5/5 touch the screen: raw touch values print below");
 }
 
 void loop() {
-  static uint32_t last;
-  uint16_t rx, ry;
-  if (lcd.getTouchRaw(&rx, &ry)) {
-    /* Rough mapping is fine here; the app calibrates properly. */
-    int x = map(rx, 200, 3900, lcd.width(), 0), y = map(ry, 200, 3900, 0, lcd.height());
-    lcd.fillCircle(constrain(x, 0, lcd.width() - 1), constrain(y, 0, lcd.height() - 1), 4, TFT_YELLOW);
-    if (millis() - last > 150) Serial.printf("[test] touch raw x=%u y=%u\n", rx, ry);
-    last = millis();
+  static uint32_t next_color, beat;
+  static uint8_t color;
+  static const uint16_t BG[] = {TFT_RED, TFT_GREEN, TFT_BLUE, TFT_WHITE};
+  static const uint16_t FG[] = {TFT_WHITE, TFT_BLACK, TFT_WHITE, TFT_BLACK};
+  static const char* const NAME[] = {"RED", "GREEN", "BLUE", "WHITE"};
+  uint32_t now = millis();
+  if (now >= next_color) {
+    next_color = now + 1000;
+    lcd.fillScreen(BG[color]);
+    lcd.setTextColor(FG[color]);
+    lcd.setTextDatum(lgfx::middle_center);
+    lcd.setFont(&fonts::FreeSansBold18pt7b);
+    lcd.drawString(NAME[color], lcd.width() / 2, lcd.height() / 2);
+    lcd.setFont(&fonts::Font2);
+    lcd.drawString("FlightScnr display test", lcd.width() / 2, lcd.height() / 2 + 40);
+    color = (color + 1) % 4;
   }
-  static uint32_t beat;
-  if (millis() - beat > 5000) {
-    beat = millis();
-    Serial.printf("[test] alive %lus, free heap %u\n", (unsigned long)(millis() / 1000), (unsigned)ESP.getFreeHeap());
+  uint16_t rx, ry;
+  static uint32_t last_touch;
+  if (lcd.getTouchRaw(&rx, &ry) && now - last_touch > 150) {
+    last_touch = now;
+    Serial.printf("[test] touch raw x=%u y=%u\n", rx, ry);
+  }
+  if (now - beat > 10000) {
+    beat = now;
+    Serial.printf("[test] alive %lus (screen should be changing colour every second)\n", (unsigned long)(now / 1000));
   }
   delay(10);
 }

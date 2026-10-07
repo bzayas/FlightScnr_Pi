@@ -211,9 +211,11 @@ void display_init(uint8_t rotation, uint16_t draw_lines) {
   lcd.setBrightness(92); /* = 60% on the perceptual curve used below */
   lcd.initDMA();
   lcd.startWrite(); /* keep the bus; touch reads release it as needed */
+  plat_mem_mark("panel");
   cal_load();
 
   lv_init();
+  plat_mem_mark("lvgl");
   int w = display_width();
   size_t px = (size_t)w * draw_lines;
   auto* b1 = (lv_color_t*)heap_caps_malloc(px * sizeof(lv_color_t), MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL);
@@ -224,6 +226,7 @@ void display_init(uint8_t rotation, uint16_t draw_lines) {
     b1 = (lv_color_t*)heap_caps_malloc(px * sizeof(lv_color_t), MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL);
   }
   lv_disp_draw_buf_init(&s_draw_buf, b1, b2, px);
+  plat_mem_mark(b2 ? "draw bufs" : "draw buf");
 
   lv_disp_drv_init(&s_disp_drv);
   s_disp_drv.hor_res = w;

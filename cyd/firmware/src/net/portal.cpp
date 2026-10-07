@@ -72,7 +72,7 @@ static void handle_get_config() {
     cfg_to_json(g_cfg, buf, cap, false);
   }
   server.sendHeader("Cache-Control", "no-store");
-  server.send(200, "application/json", buf);
+  server.send_P(200, "application/json", buf, strlen(buf)); /* no String copy */
   free(buf);
 }
 

@@ -15,8 +15,17 @@ The portal reuses the installer's settings pages, so the device and the web
 installer always offer the same options. Run after editing cyd/installer:
 
     python3 cyd/firmware/tools/build_portal.py
+
+The page, its stylesheet, icon and JS modules are served as ONE file. The
+display answers one request at a time from a few KB of free RAM; a browser
+fetching eight files in parallel could stall it, leaving the page stuck at
+"Connecting to the display". The modules are bundled by a deliberately small
+transform that only understands the forms this code uses (named imports from
+'./x.js', and `export` on function/class/const/let declarations) and refuses
+anything else.
 """
 
+import base64
 import gzip
 import hashlib
 import os
@@ -28,18 +37,14 @@ FW = os.path.dirname(HERE)
 INSTALLER = os.path.join(os.path.dirname(FW), "installer")
 OUT_DIR = os.path.join(FW, "src", "assets")
 
-# (served path, source file relative to cyd/installer, MIME type)
-ASSETS = [
-    ("/index.html", "portal.html", "text/html"),
-    ("/css/app.css", "css/app.css", "text/css"),
-    ("/js/portal.js", "js/portal.js", "text/javascript"),
-    ("/js/settings.js", "js/settings.js", "text/javascript"),
-    ("/js/schema.js", "js/schema.js", "text/javascript"),
-    ("/js/geo.js", "js/geo.js", "text/javascript"),
-    ("/js/tz_posix.js", "js/tz_posix.js", "text/javascript"),
-    ("/data/atc_feeds.json", "data/atc_feeds.json", "application/json"),
-    ("/img/icon.svg", "img/icon.svg", "image/svg+xml"),
-]
+# Modules in dependency order; the last one is the entry point.
+MODULES = ["tz_posix", "schema", "geo", "settings", "portal"]
+
+# Every source the portal is built from (hashed for --check).
+SOURCES = ["portal.html", "css/app.css", "img/icon.svg", "data/atc_feeds.json"] + [f"js/{m}.js" for m in MODULES]
+
+IMPORT_RE = re.compile(r"""^import\s*\{([^}]*)\}\s*from\s*'\./([a-z_]+)\.js';?""", re.M)
+EXPORT_RE = re.compile(r"^export\s+(?:async\s+function\s*\*?\s*(\w+)|function\s*\*?\s*(\w+)|class\s+(\w+)|(?:const|let)\s+(\w+))", re.M)
 
 HEADER = """/*
  * SPDX-License-Identifier: CC-BY-NC-SA-4.0
@@ -54,12 +59,66 @@ HEADER = """/*
 """
 
 
+def read(rel, mode="r"):
+    with open(os.path.join(INSTALLER, rel), mode) as f:
+        return f.read()
+
+
 def source_hash() -> str:
     h = hashlib.sha256()
-    for path, src, mime in ASSETS:
-        with open(os.path.join(INSTALLER, src), "rb") as f:
-            h.update(path.encode() + b"\0" + mime.encode() + b"\0" + f.read() + b"\0")
+    with open(os.path.abspath(__file__), "rb") as f:
+        h.update(f.read())  # the bundler itself
+    for rel in SOURCES:
+        h.update(rel.encode() + b"\0" + read(rel, "rb") + b"\0")
     return h.hexdigest()[:16]
+
+
+def bundle_module(name: str, entry: bool) -> str:
+    src = read(f"js/{name}.js")
+
+    def imp(m):
+        names = [n.strip() for n in m.group(1).split(",") if n.strip()]
+        binds = ", ".join(re.sub(r"\s+as\s+", ": ", n) for n in names)
+        if m.group(2) not in MODULES[: MODULES.index(name)]:
+            sys.exit(f"build_portal: {name}.js imports {m.group(2)}.js, which isn't bundled before it")
+        return f"const {{ {binds} }} = __{m.group(2)};"
+
+    src = IMPORT_RE.sub(imp, src)
+    exports = []
+
+    def exp(m):
+        exports.append(next(g for g in m.groups() if g))
+        return m.group(0)[len("export") :].lstrip()
+
+    src = EXPORT_RE.sub(exp, src)
+    leftover = re.search(r"^\s*(export|import)\b|\bimport\s*\(|\bimport\.meta\b", src, re.M)
+    if leftover:
+        line = src[: leftover.start()].count("\n") + 1
+        sys.exit(f"build_portal: js/{name}.js line ~{line}: unsupported import/export form for the bundler")
+    if entry:
+        return f"(() => {{\n{src}\n}})();\n"
+    return f"const __{name} = (() => {{\n{src}\nreturn {{ {', '.join(exports)} }};\n}})();\n"
+
+
+def build_page() -> bytes:
+    """portal.html with the stylesheet, icon and bundled modules inlined."""
+    js = "".join(bundle_module(m, m == MODULES[-1]) for m in MODULES)
+    css = read("css/app.css")
+    if "</script" in js.lower() or "</style" in css.lower():
+        sys.exit("build_portal: a closing </script> or </style> inside the inlined code would end it early")
+    icon = "data:image/svg+xml;base64," + base64.b64encode(read("img/icon.svg", "rb")).decode()
+    html = read("portal.html")
+    swaps = [
+        ('<link rel="stylesheet" href="css/app.css" />', f"<style>\n{css}\n</style>"),
+        ('href="img/icon.svg"', f'href="{icon}"'),
+        ('src="img/icon.svg"', f'src="{icon}"'),
+        ('<script type="module" src="js/portal.js"></script>', f'<script type="module">\n{js}</script>'),
+    ]
+    for old, new in swaps:
+        if old not in html:
+            sys.exit(f"build_portal: portal.html changed, can't find {old!r}")
+        html = html.replace(old, new)
+    return html.encode()
 
 
 def check() -> int:
@@ -77,10 +136,14 @@ def check() -> int:
 def main() -> int:
     if "--check" in sys.argv:
         return check()
+    files = [
+        ("/index.html", "text/html", build_page()),
+        # fetched by the Audio page only (LiveATC airport list)
+        ("/data/atc_feeds.json", "application/json", read("data/atc_feeds.json", "rb")),
+        ("/img/icon.svg", "image/svg+xml", read("img/icon.svg", "rb")),
+    ]
     blobs = []
-    for path, src, mime in ASSETS:
-        with open(os.path.join(INSTALLER, src), "rb") as f:
-            raw = f.read()
+    for path, mime, raw in files:
         # mtime=0 keeps the output byte-identical between runs
         gz = gzip.compress(raw, compresslevel=9, mtime=0)
         blobs.append((path, mime, gz, len(raw)))

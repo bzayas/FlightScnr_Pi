@@ -13,6 +13,7 @@
 
 #include <ESPmDNS.h>
 #include <WiFi.h>
+#include <esp_heap_caps.h>
 #include <esp_system.h>
 #include <esp_wifi.h>
 
@@ -157,6 +158,24 @@ static void on_connected() {
   MDNS.end();
   if (MDNS.begin(nc.host[0] ? nc.host : "flightscnr")) MDNS.addService("http", "tcp", 80);
   s_refresh |= NET_REFRESH_ALL;
+  plat_mem_mark("connected");
+}
+
+/* Free heap and each task's unused stack, so a device log shows where RAM
+ * goes (the board has no PSRAM). Every minute at first, then every 10. */
+static void mem_report() {
+  static uint32_t next = 60000, n;
+  uint32_t now = millis();
+  if ((int32_t)(now - next) < 0) return;
+  next = now + (++n < 5 ? 60000u : 600000u);
+  auto spare = [](const char* name) -> int {
+    TaskHandle_t t = xTaskGetHandle(name);
+    return t ? (int)uxTaskGetStackHighWaterMark(t) : -1;
+  };
+  Serial.printf("[mem] heap %u (lowest %u), largest block %u; spare stack: ui %d, net %d, portal %d, audio %d\n",
+                (unsigned)heap_caps_get_free_size(MALLOC_CAP_8BIT), (unsigned)plat_min_free_heap(),
+                (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT), spare("loopTask"),
+                (int)uxTaskGetStackHighWaterMark(nullptr), spare("portal"), spare("audio"));
 }
 
 static void wifi_service() {
@@ -337,6 +356,7 @@ static bool build_url(uint8_t src, float radius_nm, char* url, size_t n) {
 }
 
 static uint32_t s_peak_day;
+static int16_t s_feed_told[SRC_COUNT]; /* last failure logged per source */
 
 static bool fetch_flights() {
   float radius = nc.range_nm * 1.3f + 3.0f; /* a margin for rim blips */
@@ -352,9 +372,14 @@ static bool fetch_flights() {
     last_code = code;
     last_src = src;
     if (code != 200) {
-      Serial.printf("[feed] %s: %d %s\n", source_name(src), code, http_reason(code));
+      if (src < SRC_COUNT && s_feed_told[src] != code) { /* each new failure once, not every poll */
+        s_feed_told[src] = (int16_t)code;
+        Serial.printf("[feed] %s: %d %s%s\n", source_name(src), code, http_reason(code),
+                      code == HTTP_ERR_LOW_MEMORY ? " (needs HTTPS, skipped until memory allows)" : "");
+      }
       continue;
     }
+    if (src < SRC_COUNT) s_feed_told[src] = 0;
     int n = s_stage_n;
     bool tracked_local = false;
     uint16_t in_range = 0;
@@ -590,6 +615,7 @@ static void net_task(void*) {
       }
     }
     wifi_service();
+    mem_report();
     uint32_t now = millis();
     if (WiFi.status() != WL_CONNECTED || !has_location()) {
       vTaskDelay(pdMS_TO_TICKS(100));
@@ -639,6 +665,7 @@ void net_init() {
   WiFi.persistent(false);
   WiFi.setHostname(nc.host[0] ? nc.host : "flightscnr");
   WiFi.mode(WIFI_STA);
+  plat_mem_mark("wifi");
   if (esp_reset_reason() == ESP_RST_BROWNOUT) {
     /* Weak USB supply: transmit power peaks are what pull the rail down. */
     WiFi.setTxPower(WIFI_POWER_11dBm);
@@ -649,5 +676,6 @@ void net_init() {
   s_disconnected_since = millis();
   sta_begin();
   portal_init();
+  plat_mem_mark("portal");
   xTaskCreatePinnedToCore(net_task, "net", 12288, nullptr, 3, nullptr, 0);
 }

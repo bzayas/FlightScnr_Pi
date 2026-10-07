@@ -15,11 +15,32 @@ import { SECTIONS, SettingsUI, h, tile, toast } from './settings.js';
 
 const BT_STATES = ['Off', 'Restart needed', 'Ready', 'Searching', 'Connecting', 'Connected', 'Playing', 'Failed'];
 
+window.__fsStarted = true; // the page's code arrived (see the watchdog in portal.html)
+
+// The display serves one request at a time and can be busy fetching flights,
+// so every call gets a deadline instead of waiting forever.
 async function j(url, opts) {
-  const res = await fetch(url, { cache: 'no-store', ...opts });
+  let res;
+  try {
+    res = await fetch(url, { cache: 'no-store', signal: AbortSignal.timeout(12000), ...opts });
+  } catch (e) {
+    throw new Error(e.name === 'TimeoutError' ? 'no answer in time' : 'no answer');
+  }
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
   return data;
+}
+
+// For the first load: a few tries, since a busy display drops connections.
+async function retry(fn, tries = 3) {
+  for (let i = 1; ; i++) {
+    try {
+      return await fn();
+    } catch (e) {
+      if (i >= tries) throw e;
+      await new Promise((r) => setTimeout(r, 1500 * i));
+    }
+  }
 }
 const post = (url, body) => j(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
 
@@ -195,7 +216,9 @@ async function boot() {
     if (Object.keys(pending()).length) e.preventDefault();
   });
   try {
-    const [cfg, st] = await Promise.all([api.config(), api.status().catch(() => null)]);
+    // One after the other: the display answers a single request at a time.
+    const cfg = await retry(api.config);
+    const st = await api.status().catch(() => null);
     lastStatus = st;
     baseline = normalize(cfg);
     if (st) document.getElementById('devname').textContent = st.device;

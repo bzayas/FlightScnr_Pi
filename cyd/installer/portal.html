@@ -35,6 +35,15 @@
       <button type="button" class="btn small revert">Revert</button>
       <button type="button" class="btn small primary">Save</button>
     </div>
+    <script>
+      // If the page's code never arrives (the display was too busy to send
+      // it), say so instead of showing "Connecting" forever.
+      setTimeout(() => {
+        if (window.__fsStarted) return;
+        document.getElementById('main').innerHTML =
+          '<div class="note err"><span>⚠️</span><p>The display didn’t finish sending this page. It may be busy or short on memory. <a href="">Reload</a> in a few seconds.</p></div>';
+      }, 20000);
+    </script>
     <script type="module" src="js/portal.js"></script>
   </body>
 </html>

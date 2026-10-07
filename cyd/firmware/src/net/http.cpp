@@ -19,9 +19,16 @@
 #include "assets/ca_bundle.h"
 #include "core/platform.h"
 
-/* A TLS handshake needs ~40 KB of contiguous-ish heap on the ESP32. Skip a
- * request rather than fragmenting the heap the UI and audio depend on. */
-static const uint32_t TLS_MIN_BLOCK = 38000;
+/* TLS on this SDK takes two 16 KB record buffers plus the handshake: ~44 KB
+ * at its peak. Only start one when that leaves room for the screen and
+ * Wi-Fi (an LVGL allocation that fails restarts the device). */
+static const uint32_t TLS_NEED_FREE = (44 + 16) * 1024;
+static const uint32_t TLS_NEED_BLOCK = 18 * 1024;
+
+static bool tls_fits() {
+  return heap_caps_get_free_size(MALLOC_CAP_8BIT) >= TLS_NEED_FREE &&
+         heap_caps_get_largest_free_block(MALLOC_CAP_8BIT) >= TLS_NEED_BLOCK;
+}
 
 /* Public, keyless feeds that also answer over plain HTTP. When memory is too
  * tight for TLS (e.g. Bluetooth audio is on), these still work. Never add a
@@ -31,7 +38,7 @@ static const char* const PLAIN_OK[] = {"api.adsb.lol/", "api.open-meteo.com/"};
 int http_get(const char* url, HttpBodyFn fn, void* ctx, uint32_t timeout_ms) {
   bool https = strncmp(url, "https://", 8) == 0;
   char plain_url[320];
-  if (https && heap_caps_get_largest_free_block(MALLOC_CAP_8BIT) < TLS_MIN_BLOCK) {
+  if (https && !tls_fits()) {
     bool ok = false;
     for (const char* h : PLAIN_OK)
       if (strncmp(url + 8, h, strlen(h)) == 0) ok = true;

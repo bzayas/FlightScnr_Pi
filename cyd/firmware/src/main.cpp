@@ -167,8 +167,10 @@ void setup() {
                 (unsigned)plat_free_heap());
   plat_apply_timezone(g_cfg.tz_posix);
 
-  /* Smaller draw buffers when Bluetooth Classic owns ~100 KB of RAM. */
-  display_init(g_cfg.rotation, g_bt_mem_kept ? 16 : 32);
+  /* Two 16-line bands (2 x 10 KB) keep DMA and rendering overlapped; more
+   * buys little speed and the board has no PSRAM. Bluetooth Classic owns
+   * ~100 KB of RAM, so it gets smaller ones. */
+  display_init(g_cfg.rotation, g_bt_mem_kept ? 12 : 16);
   Serial.printf("[boot] display ok, heap %u\n", (unsigned)plat_free_heap());
   ui_init(display_width(), display_height());
   Serial.printf("[boot] ui ok, heap %u\n", (unsigned)plat_free_heap());
