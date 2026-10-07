@@ -10,21 +10,28 @@
  */
 
 /*
- * Display test firmware (env cyd-display-test). No Wi-Fi, no UI library:
- * it drives the backlight pin directly, cycles the RGB LED, reads the
- * ST7796's ID over SPI, fills the screen with colours and echoes touches.
- * Every step is logged at 115200 baud, so the installer's Device log shows
- * how far it got even if nothing appears on the screen.
+ * Display test / board finder (env cyd-display-test). No Wi-Fi, no UI or
+ * graphics library: plain GPIO and SPI, so it also rules out the app's own
+ * display driver. It works out which of the known ESP32 (non-S3) 320x480
+ * board wirings this board has:
+ *
+ *   A. backlight sweep: each pin that a known board uses for its backlight
+ *      goes high for 3 s, then low for 1 s ("did the screen light up?");
+ *   B. wiring sweep: with every candidate backlight on, each known SPI wiring
+ *      drives the panel (ST7796 / ILI9488 / ILI9486 all take this sequence),
+ *      reads its ID and fills the screen red, green, blue.
+ *
+ * Every step is logged at 115200 baud with a step number, so whoever watches
+ * the screen can say "it lit at step A3" or "colours at B1". Only pins that are
+ * free, or harmless to drive, on the E32R40T are touched.
  */
 #ifdef FS_DISPLAY_TEST
 
 #include <Arduino.h>
+#include <SPI.h>
 #include <esp_system.h>
 
 #include "core/board.h"
-#include "hal/lgfx_cyd40.h"
-
-static LGFX_CYD40 lcd;
 
 static const char* reset_reason() {
   switch (esp_reset_reason()) {
@@ -46,91 +53,210 @@ static void led(bool r, bool g, bool b) { /* common anode: LOW = on */
   digitalWrite(PIN_LED_B, b ? LOW : HIGH);
 }
 
+/* ---- A. backlight candidates ------------------------------------------- */
 
-/* Hold a pin high for a while so a person can see whether the screen glows. */
-static void backlight_probe(int pin, const char* note) {
-  pinMode(pin, OUTPUT);
-  Serial.printf("[test] backlight probe: IO%d ON for 3 s %s -> did the screen glow?\n", pin, note);
-  digitalWrite(pin, HIGH);
-  delay(3000);
-  digitalWrite(pin, LOW);
-  Serial.printf("[test] backlight probe: IO%d OFF\n", pin);
+struct BlPin {
+  int pin;
+  const char* boards;
+};
+/* Never 0 (boot button to GND), 1/3 (USB serial), 6-11 (flash), the SPI
+ * pins, the touch CS or the LEDs. IO4 high = E32R40T amplifier off. */
+static const BlPin BL[] = {
+    {27, "E32R40T, E32R35T, ESP32-3248S035, CrowPanel 3.5"},
+    {21, "ESP32-2432S028 (2.8\" CYD)"},
+    {23, "WT32-SC01"},
+    {32, "M5Stack-style boards"},
+    {4, "TTGO T-Display-style boards"},
+    {5, "ESP-WROVER-KIT-style boards"},
+    {25, "other DIY boards"},
+};
+static const int NBL = sizeof(BL) / sizeof(BL[0]);
+
+static void all_backlights_on(int except1, int except2, int except3) {
+  for (const BlPin& b : BL) {
+    if (b.pin == except1 || b.pin == except2 || b.pin == except3) continue;
+    pinMode(b.pin, OUTPUT);
+    digitalWrite(b.pin, HIGH);
+  }
+}
+
+/* ---- B. panel wirings ---------------------------------------------------- */
+
+struct Wiring {
+  const char* name;
+  int sck, mosi, miso, cs, dc, rst; /* rst -1: tied to EN */
+};
+static const Wiring WIRING[] = {
+    {"E32R40T / E32R35T / ESP32-3248S035 / CYD (DC 2)", 14, 13, 12, 15, 2, -1},
+    {"WT32-SC01 (DC 21, RST 22)", 14, 13, 12, 15, 21, 22},
+    {"Makerfabs 3.5\" (DC 33, RST 26)", 14, 13, 12, 15, 33, 26},
+    {"TFT_eSPI default wiring (VSPI 18/23/19, DC 2, RST 4)", 18, 23, 19, 15, 2, 4},
+};
+static const int NWIRING = sizeof(WIRING) / sizeof(WIRING[0]);
+
+static SPIClass spi(HSPI);
+static const Wiring* W;
+static const SPISettings WRITE_SPI(10000000, MSBFIRST, SPI_MODE0);
+static const SPISettings READ_SPI(4000000, MSBFIRST, SPI_MODE0);
+
+static void cmd(uint8_t c, const uint8_t* data = nullptr, size_t n = 0) {
+  spi.beginTransaction(WRITE_SPI);
+  digitalWrite(W->cs, LOW);
+  digitalWrite(W->dc, LOW);
+  spi.transfer(c);
+  digitalWrite(W->dc, HIGH);
+  for (size_t i = 0; i < n; i++) spi.transfer(data[i]);
+  digitalWrite(W->cs, HIGH);
+  spi.endTransaction();
+}
+
+/* Raw bytes after a read command: anything but all 00 / all FF means a
+ * panel answered (the dummy cycle shifts them, so no exact match is needed). */
+static void read_reg(uint8_t c, uint8_t* out, int n) {
+  spi.beginTransaction(READ_SPI);
+  digitalWrite(W->cs, LOW);
+  digitalWrite(W->dc, LOW);
+  spi.transfer(c);
+  digitalWrite(W->dc, HIGH);
+  for (int i = 0; i < n; i++) out[i] = spi.transfer(0x00);
+  digitalWrite(W->cs, HIGH);
+  spi.endTransaction();
+}
+
+static bool answered(const uint8_t* b, int n) {
+  bool zero = true, ones = true;
+  for (int i = 0; i < n; i++) {
+    if (b[i] != 0x00) zero = false;
+    if (b[i] != 0xFF) ones = false;
+  }
+  return !zero && !ones;
+}
+
+static void begin_wiring(const Wiring& w) {
+  W = &w;
+  spi.end();
+  pinMode(w.cs, OUTPUT);
+  digitalWrite(w.cs, HIGH);
+  pinMode(w.dc, OUTPUT);
+  digitalWrite(w.dc, HIGH);
+  pinMode(PIN_TOUCH_CS, OUTPUT); /* keep the E32R40T touch chip off the bus */
+  digitalWrite(PIN_TOUCH_CS, HIGH);
+  spi.begin(w.sck, w.miso, w.mosi, -1);
+  if (w.rst >= 0) {
+    pinMode(w.rst, OUTPUT);
+    digitalWrite(w.rst, LOW);
+    delay(20);
+    digitalWrite(w.rst, HIGH);
+    delay(150);
+  }
+  cmd(0x01); /* software reset */
+  delay(150);
+  cmd(0x11); /* sleep out */
+  delay(150);
+  const uint8_t colmod = 0x66; /* 18-bit: the one format all three panels take over SPI */
+  cmd(0x3A, &colmod, 1);
+  const uint8_t madctl = 0x48;
+  cmd(0x36, &madctl, 1);
+  cmd(0x13); /* normal mode */
+  cmd(0x29); /* display on */
+  delay(50);
+}
+
+static void fill(uint8_t r, uint8_t g, uint8_t b) {
+  const uint8_t caset[] = {0, 0, (LCD_NATIVE_W - 1) >> 8, (LCD_NATIVE_W - 1) & 0xFF};
+  const uint8_t raset[] = {0, 0, (LCD_NATIVE_H - 1) >> 8, (LCD_NATIVE_H - 1) & 0xFF};
+  cmd(0x2A, caset, 4);
+  cmd(0x2B, raset, 4);
+  static uint8_t line[LCD_NATIVE_W * 3];
+  for (int i = 0; i < LCD_NATIVE_W; i++) {
+    line[3 * i] = r;
+    line[3 * i + 1] = g;
+    line[3 * i + 2] = b;
+  }
+  spi.beginTransaction(WRITE_SPI);
+  digitalWrite(W->cs, LOW);
+  digitalWrite(W->dc, LOW);
+  spi.transfer(0x2C);
+  digitalWrite(W->dc, HIGH);
+  for (int y = 0; y < LCD_NATIVE_H; y++) spi.writeBytes(line, sizeof(line));
+  digitalWrite(W->cs, HIGH);
+  spi.endTransaction();
+}
+
+/* One pass of B for wiring i: ID reads, then red, green, blue for 1 s each. */
+static void try_wiring(int i, bool verbose) {
+  const Wiring& w = WIRING[i];
+  all_backlights_on(w.dc, w.rst, w.mosi);
+  begin_wiring(w);
+  if (verbose) {
+    uint8_t id[4], id4[4], pwr[2];
+    read_reg(0x04, id, 4);
+    read_reg(0xD3, id4, 4);
+    read_reg(0x0A, pwr, 2);
+    bool any = answered(id, 4) || answered(id4, 4) || answered(pwr, 2);
+    Serial.printf("[test] B%d %s\n", i + 1, w.name);
+    Serial.printf("[test]    panel reads: 04h %02X %02X %02X %02X | D3h %02X %02X %02X %02X | 0Ah %02X %02X -> %s\n",
+                  id[0], id[1], id[2], id[3], id4[0], id4[1], id4[2], id4[3], pwr[0], pwr[1],
+                  any ? "SOMETHING ANSWERED on this wiring" : "no answer");
+    Serial.printf("[test]    B%d: screen should now go RED, GREEN, BLUE (1 s each). Did it?\n", i + 1);
+  }
+  fill(255, 0, 0);
+  delay(1000);
+  fill(0, 255, 0);
+  delay(1000);
+  fill(0, 0, 255);
   delay(1000);
 }
 
 void setup() {
   Serial.begin(115200);
   delay(50);
-  Serial.printf("\n[test] FlightScnr CYD display test %s\n", FS_VERSION);
+  Serial.printf("\n[test] FlightScnr CYD display test / board finder %s\n", FS_VERSION);
   Serial.printf("[test] last reset: %s\n", reset_reason());
-  Serial.printf("[test] chip %s rev %d, %u MHz, flash %u KB, free heap %u\n", ESP.getChipModel(), ESP.getChipRevision(),
-                (unsigned)ESP.getCpuFreqMHz(), (unsigned)(ESP.getFlashChipSize() / 1024), (unsigned)ESP.getFreeHeap());
-  Serial.println("[test] WATCH THE SCREEN for the next 10 seconds.");
+  Serial.printf("[test] chip %s rev %d, %u MHz, flash %u KB\n", ESP.getChipModel(), ESP.getChipRevision(),
+                (unsigned)ESP.getCpuFreqMHz(), (unsigned)(ESP.getFlashChipSize() / 1024));
+  Serial.println("[test] WATCH THE SCREEN AND THE BACK OF THE BOARD. Note the step number when anything happens.");
 
-  /* 1. RGB LED: proves this firmware runs and the log matches what you see. */
   for (int pin : {PIN_LED_R, PIN_LED_G, PIN_LED_B}) pinMode(pin, OUTPUT);
-  led(1, 0, 0);
-  delay(400);
-  led(0, 1, 0);
-  delay(400);
-  led(0, 0, 1);
-  delay(400);
+  pinMode(PIN_AUDIO_EN, OUTPUT);
+  digitalWrite(PIN_AUDIO_EN, HIGH); /* E32R40T amplifier off */
+  Serial.println("[test] step 0: RGB LED on the back goes red, green, blue now (E32R40T: IO22/16/17)");
+  for (int k = 0; k < 2; k++) {
+    led(1, 0, 0);
+    delay(500);
+    led(0, 1, 0);
+    delay(500);
+    led(0, 0, 1);
+    delay(500);
+  }
   led(0, 0, 0);
-  Serial.println("[test] 1/5 RGB LED cycled red, green, blue (on the back of the board)");
 
-  /* 2. Backlight, by hand: the documented pin, then the one other 320x480
-   *    ESP32 boards use. IO21 is a spare header pin on the E32R40T. */
-  backlight_probe(PIN_LCD_BL, "(LCDWiki: this board's backlight)");
-  backlight_probe(21, "(used by some other CYD variants)");
-  pinMode(PIN_LCD_BL, OUTPUT);
-  digitalWrite(PIN_LCD_BL, HIGH);
-  Serial.println("[test] 2/5 backlight IO27 left ON");
+  Serial.println("[test] A: backlight sweep, one pin at a time (3 s high, then 1 s low)");
+  for (int i = 0; i < NBL; i++) {
+    pinMode(BL[i].pin, OUTPUT);
+    Serial.printf("[test] A%d IO%d HIGH  (%s) -> did the screen light up?\n", i + 1, BL[i].pin, BL[i].boards);
+    digitalWrite(BL[i].pin, HIGH);
+    delay(3000);
+    Serial.printf("[test] A%d IO%d LOW\n", i + 1, BL[i].pin);
+    digitalWrite(BL[i].pin, LOW);
+    delay(1000);
+  }
 
-  /* 3. Panel init + identity registers (all zero = the panel never answered,
-   *    or this board doesn't wire the panel's read line). */
-  lcd.configure(false, false, true);
-  bool ok = lcd.init();
-  lcd.setBrightness(255);
-  uint32_t id = lcd.panel.readCommand(0x04, 1, 3);  /* RDDID */
-  uint32_t id4 = lcd.panel.readCommand(0xD3, 1, 3); /* ID4: ST7796S = 0x007796 */
-  uint32_t pwr = lcd.panel.readCommand(0x0A, 1, 1); /* power mode: 0x9C when awake */
-  Serial.printf("[test] 3/5 lcd.init() %s, RDDID %06lX, ID4 %06lX%s, power mode %02lX%s\n", ok ? "ok" : "FAILED",
-                (unsigned long)id, (unsigned long)id4, (id4 & 0xFFFF) == 0x7796 ? " (ST7796 answered)" : "",
-                (unsigned long)(pwr & 0xFF), (pwr & 0xFF) == 0x9C ? " (awake, display on)" : "");
-
-  Serial.println("[test] 4/5 cycling RED, GREEN, BLUE, WHITE every second from now on");
-  Serial.println("[test] 5/5 touch the screen: raw touch values print below");
+  Serial.println("[test] B: every candidate backlight on; now trying each known screen wiring");
+  for (int i = 0; i < NWIRING; i++) try_wiring(i, true);
+  Serial.println("[test] done. Repeating B1-B4 (colours only) until unplugged.");
 }
 
 void loop() {
-  static uint32_t next_color, beat;
-  static uint8_t color;
-  static const uint16_t BG[] = {TFT_RED, TFT_GREEN, TFT_BLUE, TFT_WHITE};
-  static const uint16_t FG[] = {TFT_WHITE, TFT_BLACK, TFT_WHITE, TFT_BLACK};
-  static const char* const NAME[] = {"RED", "GREEN", "BLUE", "WHITE"};
-  uint32_t now = millis();
-  if (now >= next_color) {
-    next_color = now + 1000;
-    lcd.fillScreen(BG[color]);
-    lcd.setTextColor(FG[color]);
-    lcd.setTextDatum(lgfx::middle_center);
-    lcd.setFont(&fonts::FreeSansBold18pt7b);
-    lcd.drawString(NAME[color], lcd.width() / 2, lcd.height() / 2);
-    lcd.setFont(&fonts::Font2);
-    lcd.drawString("FlightScnr display test", lcd.width() / 2, lcd.height() / 2 + 40);
-    color = (color + 1) % 4;
+  static int i;
+  static uint32_t beat;
+  Serial.printf("[test] B%d again (%s)\n", i + 1, WIRING[i].name);
+  try_wiring(i, false);
+  i = (i + 1) % NWIRING;
+  if (millis() - beat > 30000) {
+    beat = millis();
+    Serial.printf("[test] alive %lus\n", (unsigned long)(millis() / 1000));
   }
-  uint16_t rx, ry;
-  static uint32_t last_touch;
-  if (lcd.getTouchRaw(&rx, &ry) && now - last_touch > 150) {
-    last_touch = now;
-    Serial.printf("[test] touch raw x=%u y=%u\n", rx, ry);
-  }
-  if (now - beat > 10000) {
-    beat = now;
-    Serial.printf("[test] alive %lus (screen should be changing colour every second)\n", (unsigned long)(now / 1000));
-  }
-  delay(10);
 }
 
 #endif /* FS_DISPLAY_TEST */
