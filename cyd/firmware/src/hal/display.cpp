@@ -159,6 +159,35 @@ static void flush_cb(lv_disp_drv_t* drv, const lv_area_t* a, lv_color_t* px) {
   lv_disp_flush_ready(drv);
 }
 
+/* ------------------------------------------------------------------------ */
+/* [ui] log line: how hard the UI core is working, so a slow screen can be  */
+/* told apart from a busy network or a slow feed.                           */
+/* ------------------------------------------------------------------------ */
+
+static uint32_t s_pf_frames, s_pf_ms, s_pf_worst, s_pf_px, s_pf_gap;
+
+static void monitor_cb(lv_disp_drv_t*, uint32_t ms, uint32_t px) {
+  s_pf_frames++;
+  s_pf_ms += ms;
+  s_pf_px += px;
+  if (ms > s_pf_worst) s_pf_worst = ms;
+}
+
+static void perf_service(uint32_t now) {
+  static uint32_t last_loop, since, next = 60000, n;
+  if (last_loop && now - last_loop > s_pf_gap) s_pf_gap = now - last_loop; /* longest the UI looked away */
+  last_loop = now;
+  if ((int32_t)(now - next) < 0) return;
+  next = now + (++n < 5 ? 60000u : 600000u); /* as the [mem] lines */
+  uint32_t secs = (now - since + 500) / 1000;
+  since = now;
+  if (s_pf_frames)
+    Serial.printf("[ui] %lu frames in %lu s, %lu ms each (worst %lu), %lu px each; longest busy %lu ms\n",
+                  (unsigned long)s_pf_frames, (unsigned long)secs, (unsigned long)(s_pf_ms / s_pf_frames),
+                  (unsigned long)s_pf_worst, (unsigned long)(s_pf_px / s_pf_frames), (unsigned long)s_pf_gap);
+  s_pf_frames = s_pf_ms = s_pf_worst = s_pf_px = s_pf_gap = 0;
+}
+
 int display_width() { return (s_rotation & 1) ? board().h : board().w; }
 int display_height() { return (s_rotation & 1) ? board().w : board().h; }
 
@@ -180,6 +209,7 @@ void plat_apply_panel_settings() {
 void display_service() {
   static uint32_t last;
   uint32_t now = millis();
+  perf_service(now);
   if (now - last < 16) return;
   float dt = (now - last) / 1000.0f;
   last = now;
@@ -244,6 +274,7 @@ void display_init(uint8_t rotation, uint32_t buf_bytes) {
   s_disp_drv.hor_res = w;
   s_disp_drv.ver_res = display_height();
   s_disp_drv.flush_cb = flush_cb;
+  s_disp_drv.monitor_cb = monitor_cb;
   s_disp_drv.draw_buf = &s_draw_buf;
   lv_disp_drv_register(&s_disp_drv);
 

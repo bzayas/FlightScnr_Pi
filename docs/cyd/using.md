@@ -65,12 +65,14 @@ In **Full screen** the radar uses the whole rectangle. The range you choose reac
 
 <img src="images/scope-editor.png" width="180" align="right" alt="Customize: layout arrows, accent colours and Done">
 
-Long-press the scope (or tap **Settings → Scope**) to open **Customize**:
+Long-press the scope (or tap **Settings → Scope**) to open **Customize**. The radar dims and rests, and each widget gets an outline around what it shows:
 
-- **‹ ›** switch between the layouts.
-- The coloured dots set the **accent**: the colour of the range rings, sweep and highlights.
-- **Tap any outlined slot** to choose its widget. The list only offers widgets that suit the slot's shape.
+- **‹ ›**, or a swipe sideways anywhere on the screen, switch between the layouts. The small dots under the name show which of the four you're on.
+- The coloured dots set the **accent**: the colour of the range rings, sweep and highlights. The chosen one has a ring around it.
+- **Tap any outlined widget** to choose what goes there. The list only offers widgets that suit the slot's shape. An empty slot shows a **+**.
 - **Done** saves and closes.
+
+The controls sit over the radar, in the space between the widgets, so every outline stays in reach.
 
 You can also design the scope in the [installer or the portal](settings.md#scope): it shows a preview of each layout and lists every slot by name.
 

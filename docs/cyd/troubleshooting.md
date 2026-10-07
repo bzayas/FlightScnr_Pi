@@ -34,14 +34,15 @@ Any serial monitor works too, at **115200 baud** (Arduino IDE, PlatformIO's `pio
 | `[sys] settings …` | *loaded* (with *from installer* if the installer wrote them and they haven't been changed since) or *defaults* if there were none. |
 | `[sys] ready` | The firmware started normally. |
 | `[mem] <stage> heap …` | Free memory after each start-up stage. |
-| `[mem] heap … (lowest …), largest block …` | A memory report every minute for the first five minutes, then every ten. *Lowest* is the least free memory since boot; on a 2.8″ board it normally stays above about 50 KB. The end of the line counts secure connections: *full* handshakes, *resumed* sessions (cheap reconnections) and *mbedtls* fallbacks (should stay at 0). |
+| `[mem] heap … (lowest …), largest block …` | A memory report every minute for the first five minutes, then every ten. *Lowest* is the least free memory since boot; on a 2.8″ board it normally stays above about 30 KB. The end of the line counts secure connections: *full* handshakes, *resumed* sessions (cheap reconnections) and *mbedtls* fallbacks (should stay at 0). |
 | `[net] Wi-Fi connected: <address> rssi <n>` | Joined the network. The address is the [portal](portal.md)'s. RSSI is the signal strength: −50 is excellent, −70 fair, below −80 poor. |
 | `[net] setup AP "FlightScnr-XXXX" …` | The setup hotspot opened, with its password and address. |
 | `[net] last reset was a brownout: …` | After a brownout, Wi-Fi transmit power is lowered to ease the load on the supply. |
 | `[feed] <source>: <code> <reason>` | A flight feed failed. Printed once per new problem, not every refresh. |
 | `[feed] <source>: rate limited, resting <n>s` | A feed asked FlightScnr to slow down; the next feed is used meanwhile. |
 | `[http] <host>: <code> <reason>` | A request failed: *timed out*, *host not found*, *connection failed*, *secure connection failed*, *clock not set yet* (secure connections need the time, so this is normal for a few seconds after start-up)… |
-| `[wx] Open-Meteo: 18.5 C` | Weather updated, with the source and the temperature in °C. |
+| `[ui] … frames in … s, … ms each (worst …), … px each; longest busy … ms` | How hard the screen is working, on the same schedule as the memory report: how many frames were drawn, how long one took on average and at worst, how many pixels each sent, and the longest stretch the screen was too busy to read the touch panel. Useful when the display feels slow. |
+| `[wx] Open-Meteo: 18.5 C` | Weather updated, with the source and the temperature in °C. Current conditions refresh every 15 minutes, the forecast every hour. |
 | `[wx] no weather: …` | Weather failed, and why. It retries in 2 minutes. |
 | `[diag] core 0 has been busy for … ms` | The network side was busy for a long time without a break. Useful in bug reports; occasional lines are harmless. |
 | `[lvgl] assertion failed - restarting` | The screen library hit an internal error, usually from running out of memory. Please report it with the log. |
@@ -74,6 +75,7 @@ Any serial monitor works too, at **115200 baud** (Arduino IDE, PlatformIO's `pio
 - **Taps land in the wrong place:** **Settings → Calibrate touch**. If you can't reach Settings, hold **BOOT** while the board starts, or start calibration from the portal's **System** page.
 - **Taps are ignored:** press firmly. The screen is resistive: it needs pressure, and a stylus or fingernail works better than a fingertip.
 - **Swiping between pages is hard:** check **Settings → About** shows 2026.10.7.8 or later, which reads fingertips much more reliably. Then swipe sideways about a tenth of the screen width, or flick. Press with the pad of your finger and keep it pressed until the end of the swipe. A swipe that starts out mostly sideways stays a page swipe, even if it drifts up or down.
+- **Customize is hard to use:** update to 2026.10.7.9 or later. Its controls no longer cover any widget, the buttons are larger, and you can swipe sideways to change the layout.
 
 ## Random restarts
 

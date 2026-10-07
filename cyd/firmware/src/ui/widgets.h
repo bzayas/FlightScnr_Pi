@@ -53,11 +53,19 @@
  * spacing. Depends only on the display, so it's valid from lv_init on. */
 inline bool ui_compact() { return LV_MIN(lv_disp_get_hor_res(nullptr), lv_disp_get_ver_res(nullptr)) < 300; }
 
+/* Size of a string in a font, as lv_txt_get_size(), with widths cached:
+ * the screen is drawn in bands of 12-16 lines and every band redraws the
+ * widgets, tags and cards it crosses, which measured the same strings over
+ * and over. */
+lv_point_t ui_text_size(const char* s, const lv_font_t* f, int letter_space = 0);
+inline int ui_text_w(const char* s, const lv_font_t* f, int letter_space = 0) { return ui_text_size(s, f, letter_space).x; }
+
 void widgets_init();
 void widgets_restyle();   /* after a palette change */
 
 extern lv_style_t ST_SCREEN, ST_CARD, ST_TITLE, ST_TEXT, ST_TEXT2, ST_CAPTION, ST_SEP;
-extern lv_style_t ST_BTN, ST_BTN_PR, ST_BTN_ACCENT, ST_ROW_PR, ST_ICON_TILE;
+extern lv_style_t ST_BTN, ST_BTN_PR, ST_BTN_ACCENT, ST_BTN_ACCENT_PR, ST_ROW_PR, ST_ICON_TILE;
+extern lv_style_t ST_FILL; /* neutral filled control (round icon buttons) */
 extern lv_style_t ST_SWITCH, ST_SWITCH_ON, ST_SWITCH_KNOB, ST_SLIDER, ST_SLIDER_IND, ST_SLIDER_KNOB;
 
 lv_obj_t* w_label(lv_obj_t* parent, const char* text, const lv_font_t* font, lv_style_t* style);

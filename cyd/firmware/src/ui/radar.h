@@ -44,6 +44,7 @@ void radar_select(uint32_t icao);
 uint32_t radar_selected();
 void radar_invalidate_all();
 void radar_set_dim(uint8_t opa);   /* editor mode dims the radar */
+void radar_set_covered(bool covered); /* a sheet is over it: rest */
 void radar_location_changed();     /* rebuild runway list */
 /* Snapshot of displayed tracks (for widgets / lists). */
 int radar_copy_flights(Flight* out, int max, float* dist_nm);

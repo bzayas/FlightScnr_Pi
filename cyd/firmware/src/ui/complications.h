@@ -65,6 +65,9 @@ typedef void (*CompTapCb)(uint8_t comp);
 lv_obj_t* comp_create(lv_obj_t* parent, const SlotDef& def, uint8_t comp, int rcx, int rcy, int rr);
 void comp_set(lv_obj_t* obj, uint8_t comp);
 uint8_t comp_get(lv_obj_t* obj);
+/* What a slot's widget actually draws, in screen coordinates: the ink of its
+ * text and glyphs (or its card). False when the slot is empty. */
+bool comp_content_area(lv_obj_t* obj, lv_area_t* out);
 void comp_set_tap_cb(CompTapCb cb);
 void comp_refresh_context();       /* snapshot model/time once per tick */
 void comp_update(lv_obj_t* obj, bool force);

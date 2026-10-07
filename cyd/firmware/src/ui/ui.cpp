@@ -204,7 +204,13 @@ struct SheetData {
 static void anim_y(void* o, int32_t v) { lv_obj_set_y((lv_obj_t*)o, (lv_coord_t)v); }
 static void anim_opa(void* o, int32_t v) { lv_obj_set_style_bg_opa((lv_obj_t*)o, (lv_opa_t)v, 0); }
 
+static int s_sheets; /* open sheets: the radar rests under them (and the setup card) */
+static bool setup_visible();
+static void update_cover() { radar_set_covered(s_sheets > 0 || setup_visible()); }
+
 static void sheet_deleted(lv_event_t* e) {
+  if (--s_sheets < 0) s_sheets = 0;
+  update_cover();
   SheetData* d = (SheetData*)lv_obj_get_user_data(lv_event_get_target(e));
   if (d) {
     lv_anim_del(d->card, nullptr);
@@ -256,6 +262,8 @@ lv_obj_t* sheet_open(const char* title, int height_pct) {
   memset(d, 0, sizeof(*d));
   lv_obj_set_user_data(root, d);
   lv_obj_add_event_cb(root, sheet_deleted, LV_EVENT_DELETE, nullptr);
+  s_sheets++;
+  update_cover();
 
   d->backdrop = lv_obj_create(root);
   lv_obj_remove_style_all(d->backdrop);
@@ -332,7 +340,7 @@ lv_obj_t* sheet_open(const char* title, int height_pct) {
   lv_anim_set_var(&a, d->card);
   lv_anim_set_exec_cb(&a, anim_y);
   lv_anim_set_values(&a, s_h, s_h - h);
-  lv_anim_set_time(&a, 340);
+  lv_anim_set_time(&a, 280);
   lv_anim_set_path_cb(&a, lv_anim_path_ease_out);
   lv_anim_start(&a);
   lv_anim_t b;
@@ -340,7 +348,7 @@ lv_obj_t* sheet_open(const char* title, int height_pct) {
   lv_anim_set_var(&b, d->backdrop);
   lv_anim_set_exec_cb(&b, anim_opa);
   lv_anim_set_values(&b, 0, 120);
-  lv_anim_set_time(&b, 300);
+  lv_anim_set_time(&b, 240);
   lv_anim_start(&b);
   return root;
 }
@@ -484,9 +492,20 @@ void ui_identify() {
 /* Wi-Fi setup card (shown while the device runs its setup hotspot)          */
 /* ------------------------------------------------------------------------ */
 
+static bool setup_visible() { return s_setup && !lv_obj_has_flag(s_setup, LV_OBJ_FLAG_HIDDEN); }
+
+static void setup_show(bool on) {
+  if (!s_setup || on == setup_visible()) return;
+  if (on)
+    lv_obj_clear_flag(s_setup, LV_OBJ_FLAG_HIDDEN);
+  else
+    lv_obj_add_flag(s_setup, LV_OBJ_FLAG_HIDDEN);
+  update_cover();
+}
+
 static void setup_later(lv_event_t*) {
   s_setup_dismissed = true;
-  if (s_setup) lv_obj_add_flag(s_setup, LV_OBJ_FLAG_HIDDEN);
+  setup_show(false);
 }
 
 void setup_card_update() {
@@ -497,31 +516,39 @@ void setup_card_update() {
   }
   bool want = ns.ap_mode && !ns.connected && !s_setup_dismissed && s_ready && ns.ap_ssid[0];
   if (!want) {
-    if (s_setup) lv_obj_add_flag(s_setup, LV_OBJ_FLAG_HIDDEN);
+    setup_show(false);
     if (ns.connected) s_setup_dismissed = false;
     return;
   }
   if (!s_setup) {
     const bool cp = ui_compact();
     const bool side = s_h < 260; /* 320x240: QR code beside the text */
+    /* a dimmed backdrop: the card is the one thing to look at */
     s_setup = lv_obj_create(lv_layer_top());
     lv_obj_remove_style_all(s_setup);
-    lv_obj_add_style(s_setup, &ST_CARD, 0);
-    lv_obj_set_style_radius(s_setup, cp ? 16 : 22, 0);
-    lv_obj_set_style_pad_all(s_setup, cp ? 10 : 16, 0);
-    lv_obj_set_style_pad_row(s_setup, cp ? 6 : 10, 0);
-    lv_obj_set_style_pad_column(s_setup, 12, 0);
-    lv_obj_set_size(s_setup, side ? s_w - 24 : LV_MIN(s_w - 24, 300), LV_SIZE_CONTENT);
-    lv_obj_set_flex_flow(s_setup, side ? LV_FLEX_FLOW_ROW : LV_FLEX_FLOW_COLUMN);
-    lv_obj_set_flex_align(s_setup, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_size(s_setup, s_w, s_h);
+    lv_obj_set_style_bg_color(s_setup, lv_color_black(), 0);
+    lv_obj_set_style_bg_opa(s_setup, 110, 0);
+    lv_obj_add_flag(s_setup, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_HIDDEN);
     lv_obj_clear_flag(s_setup, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_t* text_col = s_setup;
+    lv_obj_t* card = lv_obj_create(s_setup);
+    lv_obj_remove_style_all(card);
+    lv_obj_add_style(card, &ST_CARD, 0);
+    lv_obj_set_style_radius(card, cp ? 16 : 22, 0);
+    lv_obj_set_style_pad_all(card, cp ? 12 : 16, 0);
+    lv_obj_set_style_pad_row(card, cp ? 8 : 10, 0);
+    lv_obj_set_style_pad_column(card, 14, 0);
+    lv_obj_set_size(card, side ? s_w - 24 : LV_MIN(s_w - 24, 300), LV_SIZE_CONTENT);
+    lv_obj_set_flex_flow(card, side ? LV_FLEX_FLOW_ROW : LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_flex_align(card, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_clear_flag(card, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_t* text_col = card;
     char qr[96];
     snprintf(qr, sizeof(qr), "WIFI:T:WPA;S:%s;P:%s;;", ns.ap_ssid, ns.ap_pass);
     if (side) {
-      lv_obj_t* code = lv_qrcode_create(s_setup, 96, pal().text, pal().platter);
+      lv_obj_t* code = lv_qrcode_create(card, 96, pal().text, pal().platter);
       lv_qrcode_update(code, qr, strlen(qr));
-      text_col = lv_obj_create(s_setup);
+      text_col = lv_obj_create(card);
       lv_obj_remove_style_all(text_col);
       lv_obj_set_flex_grow(text_col, 1);
       lv_obj_set_height(text_col, LV_SIZE_CONTENT);
@@ -532,11 +559,12 @@ void setup_card_update() {
     }
     w_label(text_col, SYM_WIFI "  Connect to Wi-Fi", side ? &fs_text_14 : (cp ? &fs_text_16 : &fs_text_20), &ST_TEXT);
     if (!side) {
-      lv_obj_t* code = lv_qrcode_create(s_setup, cp ? 96 : 120, pal().text, pal().platter);
+      lv_obj_t* code = lv_qrcode_create(card, cp ? 96 : 120, pal().text, pal().platter);
       lv_qrcode_update(code, qr, strlen(qr));
     }
+    /* one thing per line, so nothing breaks mid-name */
     char txt[200];
-    snprintf(txt, sizeof(txt), "Scan, or join \"%s\"\npassword %s\nthen open http://192.168.4.1\n(or use the web installer)",
+    snprintf(txt, sizeof(txt), "Scan the code, or join\n%s\npassword %s\nthen open 192.168.4.1\nor use the web installer",
              ns.ap_ssid, ns.ap_pass);
     lv_obj_t* l = w_label(text_col, txt, cp ? &fs_text_12 : &fs_text_14, &ST_TEXT2);
     lv_obj_set_style_text_align(l, LV_TEXT_ALIGN_CENTER, 0);
@@ -545,10 +573,12 @@ void setup_card_update() {
       lv_label_set_long_mode(l, LV_LABEL_LONG_WRAP);
     }
     lv_obj_t* later = w_button(text_col, "Later", false);
+    lv_obj_add_style(later, &ST_FILL, 0); /* a filled button on the white card */
+    lv_obj_set_style_radius(later, LV_RADIUS_CIRCLE, 0);
     lv_obj_add_event_cb(later, setup_later, LV_EVENT_CLICKED, nullptr);
-    lv_obj_center(s_setup);
+    lv_obj_center(card);
   }
-  lv_obj_clear_flag(s_setup, LV_OBJ_FLAG_HIDDEN);
+  setup_show(true);
 }
 
 /* ------------------------------------------------------------------------ */

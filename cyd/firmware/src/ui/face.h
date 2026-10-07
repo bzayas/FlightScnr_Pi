@@ -14,6 +14,7 @@
 #pragma once
 
 #include <lvgl.h>
+#include <stddef.h>
 #include <stdint.h>
 
 lv_obj_t* face_create(lv_obj_t* parent, int w, int h);
@@ -22,3 +23,7 @@ void face_tick(bool second_changed);
 void face_editor_open();
 void face_editor_close();
 bool face_editor_active();
+/* Checks the editor's own layout: every outline on screen, and the panel on
+ * screen and clear of them. Writes the problems to out; returns how many. */
+int face_editor_problems(char* out, size_t n);
+lv_obj_t* face_editor_panel(); /* for the simulator's tap tests */

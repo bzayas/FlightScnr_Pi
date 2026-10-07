@@ -665,7 +665,7 @@ static void net_task(void*) {
     }
     uint32_t want = s_refresh;
     s_refresh = 0;
-    if (want & NET_REFRESH_FLIGHTS) next_flights = now;
+    if (want & NET_REFRESH_FLIGHTS) next_flights = now + 500; /* taps through the ranges make one fetch */
     /* A start or a refresh staggers the work: flights, then the current
      * weather, the forecast 30 s later and earthquakes after 45 s, rather
      * than everything at once while the screen is being used. */

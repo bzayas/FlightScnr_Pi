@@ -106,6 +106,12 @@ static lv_area_t s_sweep_area;
 static bool s_sweep_area_valid;
 static uint32_t s_theme_rev;
 static uint8_t s_dim = 255;
+static bool s_covered;
+/* Quiet while dimmed (Customize) or under a sheet: no sweep, and aircraft
+ * positions twice a second instead of every frame, so the screen isn't
+ * redrawn under whatever the finger is doing. */
+static bool quiet() { return s_dim != 255 || s_covered; }
+static bool sweeping() { return g_cfg.sweep && !quiet(); }
 static uint32_t s_tags_next_ms;
 static RunwayPx s_rwy[MAX_RWY];
 static int s_nrwy;
@@ -360,10 +366,8 @@ static void format_tag(Track& t) {
   fmt_alt(t.f.alt_ft, t.line_alt, sizeof(t.line_alt));
   t.descending = t.f.vs_fpm < -64;
   const lv_font_t* font = &fs_text_12;
-  lv_point_t s1, s2, s3;
-  lv_txt_get_size(&s1, t.line_id, font, 0, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
-  lv_txt_get_size(&s2, t.line_type, font, 0, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
-  lv_txt_get_size(&s3, t.line_alt, font, 0, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
+  lv_point_t s1 = ui_text_size(t.line_id, font), s2 = ui_text_size(t.line_type, font),
+             s3 = ui_text_size(t.line_alt, font);
   int lines = g_cfg.tag_lines;
   int w = s1.x;
   if (lines >= 2 && t.line_type[0]) w = LV_MAX(w, s2.x);
@@ -438,8 +442,7 @@ static const int LABEL_OBSTACLES = 16; /* compass letters + ring distances */
 
 /* A label centred on (x, y) relative to the radar centre, as a box. */
 static lv_area_t label_box(const char* s, const lv_font_t* f, float x, float y) {
-  lv_point_t sz;
-  lv_txt_get_size(&sz, s, f, 0, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
+  lv_point_t sz = ui_text_size(s, f);
   lv_coord_t x1 = (lv_coord_t)lroundf(x - sz.x / 2.0f), y1 = (lv_coord_t)lroundf(y - sz.y / 2.0f);
   return {x1, y1, (lv_coord_t)(x1 + sz.x), (lv_coord_t)(y1 + sz.y)};
 }
@@ -627,7 +630,7 @@ __attribute__((noinline)) static void update_tracks(float dt, float acx, float a
     t.alpha = target > t.alpha ? fminf(target, t.alpha + step) : fmaxf(target, t.alpha - step);
     /* radar ping when the sweep passes over the target */
     float bearing = fx_fast_atan2_deg(x, y);
-    if (g_cfg.sweep && !t.rim) {
+    if (sweeping() && !t.rim) {
       float sw_moved = angle_diff(s_sweep, prev);
       float rel = angle_diff(bearing, prev);
       if (sw_moved > 0 && rel > 0 && rel <= sw_moved) t.ping = 1.0f;
@@ -647,6 +650,7 @@ static void radar_timer_cb(lv_timer_t*) {
   uint32_t now = plat_millis();
   float dt = s_last_ms ? (now - s_last_ms) / 1000.0f : 0.033f;
   if (dt > 0.25f) dt = 0.25f;
+  if (quiet() && s_last_ms && now - s_last_ms < 500) return;
   s_last_ms = now;
   if (!obj_on_screen()) return;
 
@@ -683,7 +687,7 @@ static void radar_timer_cb(lv_timer_t*) {
   /* sweep */
   float prev = s_sweep;
   s_sweep = fmodf(now, SWEEP_PERIOD_MS) / SWEEP_PERIOD_MS * 360.0f;
-  if (g_cfg.sweep) {
+  if (sweeping()) {
     lv_area_t a;
     sweep_area(s_sweep, acx, acy, &a);
     if (s_sweep_area_valid) {
@@ -718,7 +722,7 @@ static void draw_field_rect(Fx& f, float acx, float acy, const lv_area_t& tb, co
   lv_area_t o;
   lv_obj_get_coords(s_obj, &o);
   lv_color_t disc = pal().disc;
-  bool sweep = g_cfg.sweep;
+  bool sweep = sweeping();
   int32_t y0 = LV_MAX(f.cy0, o.y1), y1 = LV_MIN(f.cy1, o.y2);
   int32_t xa = LV_MAX(f.cx0, o.x1), xb = LV_MIN(f.cx1, o.x2);
   for (int32_t y = y0; y <= y1; y++) {
@@ -742,7 +746,7 @@ static void draw_disc(Fx& f, float acx, float acy) {
   const float R = (float)s_r;
   lv_color_t disc = p.disc;
   lv_color_t acc = p.accent;
-  bool sweep = g_cfg.sweep;
+  bool sweep = sweeping();
   /* trail bounding box: skip the atan for pixels that can't be in it */
   lv_area_t tb = {0, 0, -1, -1};
   if (sweep) sweep_area(s_sweep, acx, acy, &tb);
@@ -836,8 +840,11 @@ static void draw_dashed_line(Fx& f, float x0, float y0, float x1, float y1, lv_c
 
 static void draw_text(lv_draw_ctx_t* dc, const char* txt, const lv_font_t* font, lv_color_t c, uint8_t opa, float x,
                       float y, lv_text_align_t align, bool center_v) {
-  lv_point_t sz;
-  lv_txt_get_size(&sz, txt, font, 0, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
+  /* most bands miss most labels: rule them out before measuring */
+  const lv_coord_t lh = lv_font_get_line_height(font);
+  const float top = center_v ? y - lh / 2.0f : y;
+  if (top > dc->clip_area->y2 + 1 || top + lh < dc->clip_area->y1 - 1) return;
+  lv_point_t sz = ui_text_size(txt, font);
   lv_area_t a;
   a.x1 = (lv_coord_t)lroundf(align == LV_TEXT_ALIGN_CENTER ? x - sz.x / 2.0f
                                                             : (align == LV_TEXT_ALIGN_RIGHT ? x - sz.x : x));
@@ -1103,6 +1110,12 @@ void radar_invalidate_all() {
 void radar_set_dim(uint8_t opa) {
   s_dim = opa;
   radar_invalidate_all();
+}
+
+void radar_set_covered(bool covered) {
+  if (covered == s_covered) return;
+  s_covered = covered;
+  radar_invalidate_all(); /* the sweep's trail goes, or comes back, everywhere at once */
 }
 
 void radar_location_changed() {

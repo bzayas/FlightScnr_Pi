@@ -88,7 +88,13 @@ static void apply_patch(const char* json) {
   if (before.invert != g_cfg.invert) plat_apply_panel_settings();
   plat_config_changed(true);
   if (wifi_changed) net_set_wifi(g_cfg.wifi_ssid, g_cfg.wifi_pass);
-  if (mask & (UI_CHANGED_LOCATION | UI_CHANGED_RADAR)) net_refresh(NET_REFRESH_ALL);
+  /* A new place needs everything again; a new range or layout only needs
+   * flights over the new area. Weather and earthquakes keep their own
+   * schedule (Tomorrow.io's free plan allows 25 calls an hour). */
+  if (mask & UI_CHANGED_LOCATION)
+    net_refresh(NET_REFRESH_ALL);
+  else if (before.range_nm != g_cfg.range_nm || memcmp(before.layout, g_cfg.layout, sizeof(g_cfg.layout)))
+    net_refresh(NET_REFRESH_FLIGHTS);
   ui_config_applied(mask);
   if (needs_reboot) {
     ui_toast("Restarting to apply settings\xE2\x80\xA6");

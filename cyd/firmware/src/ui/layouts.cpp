@@ -105,10 +105,10 @@ static const LayoutDef PORTRAIT_S[LAYOUT_COUNT] = {
      6,
      {{6, 3, 228, 24, FAM_INLINE, 0},
       {6, 293, 228, 24, FAM_INLINE, 0},
-      {2, 30, 56, 32, FAM_CORNER, CORNER_TL},
-      {182, 30, 56, 32, FAM_CORNER, CORNER_TR},
-      {2, 258, 56, 32, FAM_CORNER, CORNER_BL},
-      {182, 258, 56, 32, FAM_CORNER, CORNER_BR}}},
+      {2, 34, 56, 32, FAM_CORNER, CORNER_TL}, /* clear of the date and flight rows, */
+      {182, 34, 56, 32, FAM_CORNER, CORNER_TR}, /* still clear of the disc */
+      {2, 254, 56, 32, FAM_CORNER, CORNER_BL},
+      {182, 254, 56, 32, FAM_CORNER, CORNER_BR}}},
     {"Full screen", 120, 160, 0, 0, {}},
 };
 

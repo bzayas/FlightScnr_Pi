@@ -26,6 +26,7 @@
 #include "fx.h"
 #include "glyphs.h"
 #include "theme.h"
+#include "widgets.h"
 
 /* ------------------------------------------------------------------------ */
 /* Catalogue                                                                 */
@@ -608,11 +609,7 @@ struct Slot {
 static CompTapCb s_tap_cb;
 void comp_set_tap_cb(CompTapCb cb) { s_tap_cb = cb; }
 
-static int text_w(const char* s, const lv_font_t* f) {
-  lv_point_t p;
-  lv_txt_get_size(&p, s, f, 0, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
-  return p.x;
-}
+static int text_w(const char* s, const lv_font_t* f) { return ui_text_w(s, f); }
 
 /* ---- Typography -----------------------------------------------------------
  * Text is placed by its ink, not by its line box. LVGL draws a label from the
@@ -627,6 +624,10 @@ struct Ink {
 };
 
 static Ink ink(const lv_font_t* f) {
+  static const lv_font_t* fonts[12]; /* every font a widget uses; looked up on every draw */
+  static Ink inks[12];
+  for (int k = 0; k < 12 && fonts[k]; k++)
+    if (fonts[k] == f) return inks[k];
   Ink i;
   i.base = f->line_height - f->base_line;
   lv_font_glyph_dsc_t g;
@@ -634,6 +635,12 @@ static Ink ink(const lv_font_t* f) {
     i.top = i.base - (g.box_h + g.ofs_y);
   else
     i.top = i.base - f->line_height * 7 / 10;
+  for (int k = 0; k < 12; k++)
+    if (!fonts[k]) {
+      fonts[k] = f;
+      inks[k] = i;
+      break;
+    }
   return i;
 }
 
@@ -663,12 +670,40 @@ static int align_x(const char* s, const lv_font_t* f, int x, lv_text_align_t al,
   return x;
 }
 
+/* Measuring (comp_content_area): text and platters grow this box instead of
+ * drawing; fx shapes do the same through Fx::meas. */
+static lv_area_t* s_meas;
+
+static void meas_add(int x1, int y1, int x2, int y2) {
+  lv_area_t* b = s_meas;
+  if (b->x1 > b->x2) {
+    *b = {(lv_coord_t)x1, (lv_coord_t)y1, (lv_coord_t)x2, (lv_coord_t)y2};
+    return;
+  }
+  b->x1 = LV_MIN(b->x1, x1);
+  b->y1 = LV_MIN(b->y1, y1);
+  b->x2 = LV_MAX(b->x2, x2);
+  b->y2 = LV_MAX(b->y2, y2);
+}
+
+static bool has_descender(const char* s) {
+  for (; *s; s++)
+    if (strchr("gjpqy,()", *s)) return true;
+  return false;
+}
+
 /* y is the top of the line box. */
 static void txt(lv_draw_ctx_t* dc, const char* s, const lv_font_t* f, lv_color_t c, uint8_t opa, int x, int y,
                 lv_text_align_t al) {
   if (!s || !*s) return;
   int w = text_w(s, f);
   int x1 = align_x(s, f, x, al, w);
+  if (s_meas) { /* the ink: cap top to baseline, or to the descenders */
+    Ink k = ink(f);
+    int bottom = y + k.base + (has_descender(s) ? f->base_line * 3 / 4 : 0);
+    meas_add(x1, y + (has_caps(s) ? k.top : k.base - x_height(f)), x1 + w - 1, bottom);
+    return;
+  }
   lv_area_t a = {(lv_coord_t)x1, (lv_coord_t)y, (lv_coord_t)(x1 + w), (lv_coord_t)(y + f->line_height)};
   if (!_lv_area_is_on(&a, dc->clip_area)) return;
   lv_draw_label_dsc_t d;
@@ -708,7 +743,7 @@ static void txt_fit(lv_draw_ctx_t* dc, const char* s, const lv_font_t* f, lv_col
 /* Value text with a vertical roll when it changes. y is the line-box top. */
 static void value_txt(lv_draw_ctx_t* dc, Slot* s, const char* now_s, const char* prev_s, const lv_font_t* f,
                       lv_color_t c, int x, int y, lv_text_align_t al) {
-  if (!s || s->anim >= 1024 || !prev_s || !prev_s[0] || strcmp(now_s, prev_s) == 0) {
+  if (s_meas || !s || s->anim >= 1024 || !prev_s || !prev_s[0] || strcmp(now_s, prev_s) == 0) {
     txt(dc, now_s, f, c, LV_OPA_COVER, x, y, al);
     return;
   }
@@ -830,6 +865,7 @@ static void draw_pair(lv_draw_ctx_t* dc, Slot* s, const CompData& d, const Shown
 }
 
 static void platter_rect(lv_draw_ctx_t* dc, const lv_area_t& a, int radius) {
+  if (s_meas) return meas_add(a.x1, a.y1, a.x2, a.y2);
   lv_draw_rect_dsc_t r;
   lv_draw_rect_dsc_init(&r);
   r.bg_color = pal().platter;
@@ -1394,8 +1430,9 @@ static void render_corner(Fx& f, lv_draw_ctx_t* dc, Slot* s, const CompData& d, 
   uint8_t c = s ? s->def.corner : CORNER_TL;
   bool right = c == CORNER_TR || c == CORNER_BR;
   bool bottom = c == CORNER_BL || c == CORNER_BR;
-  /* gauge hugging the radar rim (Instruments corner slots) */
-  if (s && s->rr > 0 && (!isnan(d.gauge) || !isnan(d.mark)))
+  /* gauge hugging the radar rim (Instruments corner slots); an outline
+   * around the corner hugs the text, not the arc */
+  if (s && s->rr > 0 && !s_meas && (!isnan(d.gauge) || !isnan(d.mark)))
     draw_gauge_arc(f, (float)s->rcx, (float)s->rcy, s->rr + 8.0f, 2.2f, corner_bearing(c) - 17, 34, d);
   int w = lv_area_get_width(&ta), h = lv_area_get_height(&ta);
   const lv_font_t* cf = &fs_text_12;
@@ -1480,9 +1517,7 @@ static void render_inline(Fx& f, lv_draw_ctx_t* dc, Slot* s, const CompData& d, 
   if (sw) txt_fit(dc, second, sf, p.text2, x + gw + mw + space, base, sw);
 }
 
-static void render(lv_draw_ctx_t* dc, Slot* s, uint8_t family, const CompData& d, const lv_area_t& a) {
-  Fx f;
-  if (!fx_begin(dc, f)) return;
+static void render_with(Fx& f, lv_draw_ctx_t* dc, Slot* s, uint8_t family, const CompData& d, const lv_area_t& a) {
   switch (family) {
     case FAM_LARGE: render_large(f, dc, s, d, a); break;
     case FAM_RECT: render_rect(f, dc, s, d, a); break;
@@ -1490,6 +1525,11 @@ static void render(lv_draw_ctx_t* dc, Slot* s, uint8_t family, const CompData& d
     case FAM_CORNER: render_corner(f, dc, s, d, a); break;
     default: render_inline(f, dc, s, d, a); break;
   }
+}
+
+static void render(lv_draw_ctx_t* dc, Slot* s, uint8_t family, const CompData& d, const lv_area_t& a) {
+  Fx f;
+  if (fx_begin(dc, f)) render_with(f, dc, s, family, d, a);
 }
 
 void comp_draw_solar(lv_draw_ctx_t* dc, int x, int y, int w, int h, bool labels) {
@@ -1546,17 +1586,39 @@ void comp_draw_preview(lv_draw_ctx_t* dc, uint8_t comp, uint8_t family, const lv
 static lv_area_t text_area_of(lv_obj_t* obj, Slot* s) {
   lv_area_t a;
   lv_obj_get_coords(obj, &a);
-  if (s->def.family != FAM_CORNER) return a;
-  /* the object also spans the rim arc; the text sits in the slot box */
-  lv_area_t t;
-  t.x1 = s->def.x;
-  t.y1 = s->def.y;
-  t.x2 = s->def.x + s->def.w - 1;
-  t.y2 = s->def.y + s->def.h - 1;
+  if (s->def.family == FAM_CIRCULAR || s->def.family == FAM_RECT) return a; /* on their own platters */
   lv_area_t parent;
   lv_obj_get_coords(lv_obj_get_parent(obj), &parent);
-  lv_area_move(&t, parent.x1, parent.y1);
-  return t;
+  if (s->def.family == FAM_CORNER) { /* the object also spans the rim arc; the text sits in the slot box */
+    a.x1 = s->def.x;
+    a.y1 = s->def.y;
+    a.x2 = s->def.x + s->def.w - 1;
+    a.y2 = s->def.y + s->def.h - 1;
+    lv_area_move(&a, parent.x1, parent.y1);
+  }
+  /* Text keeps one margin from the screen's edges, clear of the bezel (and
+   * of the editor's outlines). Measured from the scope, not the display, so
+   * nothing shifts while the page slides. */
+  const int m = ui_compact() ? 6 : 8;
+  a.x1 = LV_MAX(a.x1, parent.x1 + m);
+  a.y1 = LV_MAX(a.y1, parent.y1 + m);
+  a.x2 = LV_MIN(a.x2, parent.x2 - m);
+  a.y2 = LV_MIN(a.y2, parent.y2 - m);
+  return a;
+}
+
+bool comp_content_area(lv_obj_t* obj, lv_area_t* out) {
+  Slot* s = (Slot*)lv_obj_get_user_data(obj);
+  if (!s || s->comp == COMP_NONE) return false;
+  lv_area_t box = {1, 1, 0, 0}; /* empty */
+  Fx f;
+  fx_begin_measure(f, &box);
+  s_meas = &box;
+  render_with(f, nullptr, s, s->def.family, s->data, text_area_of(obj, s));
+  s_meas = nullptr;
+  if (box.x1 > box.x2) return false;
+  *out = box;
+  return true;
 }
 
 static void slot_event(lv_event_t* e) {
