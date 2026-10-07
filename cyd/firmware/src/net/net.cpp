@@ -355,6 +355,7 @@ static bool build_url(uint8_t src, float radius_nm, char* url, size_t n) {
 static uint32_t s_peak_day;
 static int16_t s_feed_told[SRC_COUNT]; /* last failure logged per source */
 static uint32_t s_feed_rest_until[SRC_COUNT]; /* after "429 rate limited" */
+static uint32_t s_feed_rest_ms[SRC_COUNT];    /* that rest; doubles while the 429s continue */
 
 /* Sources that work without HTTPS (adsb.lol, a local receiver) go first:
  * an HTTPS request holds ~65 KB for a few seconds, every poll, on a board
@@ -388,7 +389,12 @@ static bool fetch_flights() {
     last_code = code;
     last_src = src;
     if (code != 200) {
-      if (code == 429) s_feed_rest_until[src] = millis() + 60000; /* the others carry on meanwhile */
+      if (code == 429) { /* the others carry on meanwhile */
+        uint32_t& rest = s_feed_rest_ms[src];
+        rest = rest ? min(rest * 2, 15u * 60u * 1000u) : 60000u;
+        s_feed_rest_until[src] = millis() + rest;
+        Serial.printf("[feed] %s: rate limited, resting %lus\n", source_name(src), (unsigned long)(rest / 1000));
+      }
       if (src < SRC_COUNT && s_feed_told[src] != code) { /* each new failure once, not every poll */
         s_feed_told[src] = (int16_t)code;
         Serial.printf("[feed] %s: %d %s%s\n", source_name(src), code, http_reason(code),
@@ -396,7 +402,10 @@ static bool fetch_flights() {
       }
       continue;
     }
-    if (src < SRC_COUNT) s_feed_told[src] = 0;
+    if (src < SRC_COUNT) {
+      s_feed_told[src] = 0;
+      s_feed_rest_ms[src] = 0;
+    }
     int n = s_stage_n;
     bool tracked_local = false;
     uint16_t in_range = 0;

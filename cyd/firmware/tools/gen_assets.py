@@ -17,7 +17,7 @@ instead of re-inventing them:
   flightscnr/assets/aircraft/icons/*.png   -> src/assets/aircraft_icons.cpp
   flightscnr/assets/data/runways.csv       -> src/assets/airports.cpp
   /usr/share/zoneinfo (TZif footers)       -> installer/js/tz_posix.js
-  certifi (Mozilla CA list)                -> src/assets/ca_bundle.cpp
+  certifi (Mozilla CA list) + tools/retired_roots.pem -> src/assets/ca_bundle.cpp
 
 Usage:  pip install pillow numpy certifi cryptography
         python3 cyd/firmware/tools/gen_assets.py
@@ -379,7 +379,22 @@ def gen_tz() -> None:
 # Root CA bundle (ESP-IDF esp_crt_bundle format) for verified HTTPS
 # ---------------------------------------------------------------------------
 
+# Roots in tools/retired_roots.pem (see the notes there), pinned by SHA-256 so
+# an edit to that file can't slip another root into the firmware.
+RETIRED_ROOTS = {
+    "EBD41040E4BB3EC742C9E381D31EF2A41A48B6685C96E7CEF3C1DF6CD4331C99",  # GlobalSign Root CA
+    "4348A0E9444C78CB265E058D5E8944B4D84F9662BD26DB257F8934A443C70161",  # DigiCert Global Root CA
+    "7431E5F4C3C1CE4690774F0B61E05440883BA9A01ED00BA6ABD7806ED3B118CF",  # DigiCert High Assurance EV Root CA
+    "3E9099B5015E8F486C00BCEA9D111EE721FABA355A89BCF1DF69561E3DC6325C",  # DigiCert Assured ID Root CA
+    "D7A7A0FB5D7E2731D771E9484EBCDEF71D5F0C3E0A2948782BC83EE0EA699EF4",  # AAA Certificate Services
+    "C3846BF24B9E93CA64274C0EC67C1ECC5E024FFCACD2D74019350E81FE546AE4",  # Go Daddy Class 2 CA
+    "1465FA205397B876FAA6F0A9958E5590E40FCC7FAA4FB7C2C8677521FB5FB658",  # Starfield Class 2 CA
+}
+
+
 def gen_ca_bundle() -> None:
+    import hashlib
+
     import certifi
     from cryptography import x509
     from cryptography.hazmat.primitives import serialization
@@ -387,6 +402,14 @@ def gen_ca_bundle() -> None:
     certs = x509.load_pem_x509_certificates(Path(certifi.where()).read_bytes())
     # Never ship a local interception CA if this script runs behind a proxy.
     certs = [c for c in certs if "agent-proxy" not in c.subject.rfc4514_string()]
+    retired = x509.load_pem_x509_certificates((HERE / "retired_roots.pem").read_bytes())
+    for c in retired:
+        fp = hashlib.sha256(c.public_bytes(serialization.Encoding.DER)).hexdigest().upper()
+        if fp not in RETIRED_ROOTS:
+            sys.exit(f"retired_roots.pem: unexpected certificate {c.subject.rfc4514_string()} ({fp})")
+    have = {c.subject.public_bytes() for c in certs}
+    extra = [c for c in retired if c.subject.public_bytes() not in have]
+    certs += extra
     entries = []
     for c in certs:
         name = c.subject.public_bytes()
@@ -408,7 +431,8 @@ extern const uint8_t CA_BUNDLE[];
 extern const size_t CA_BUNDLE_LEN;
 """
     write(OUT_SRC / "ca_bundle.h", hdr)
-    src = HEADER + f'\n#include "ca_bundle.h"\n\n// {len(entries)} roots from certifi {certifi.__version__}\n'
+    src = HEADER + (f'\n#include "ca_bundle.h"\n\n// {len(entries)} roots: certifi {certifi.__version__}'
+                    f' plus {len(extra)} from tools/retired_roots.pem\n')
     src += f"const uint8_t CA_BUNDLE[{len(blob)}] = {{\n{c_bytes(blob)}\n}};\n\nconst size_t CA_BUNDLE_LEN = sizeof(CA_BUNDLE);\n"
     write(OUT_SRC / "ca_bundle.cpp", src)
 
