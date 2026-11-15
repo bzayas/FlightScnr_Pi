@@ -40,21 +40,7 @@
  * device logs show ~4 KB used at most, so 10 KB leaves a wide margin. */
 SET_LOOP_TASK_STACK_SIZE(10 * 1024);
 
-static const char* reset_reason_name(esp_reset_reason_t r) {
-  switch (r) {
-    case ESP_RST_POWERON: return "power on";
-    case ESP_RST_EXT: return "reset pin";
-    case ESP_RST_SW: return "software restart";
-    case ESP_RST_PANIC: return "CRASH (panic)";
-    case ESP_RST_INT_WDT: return "CRASH (interrupt watchdog)";
-    case ESP_RST_TASK_WDT: return "CRASH (task watchdog)";
-    case ESP_RST_WDT: return "CRASH (watchdog)";
-    case ESP_RST_DEEPSLEEP: return "deep sleep";
-    case ESP_RST_BROWNOUT: return "BROWNOUT (power supply dipped)";
-    case ESP_RST_SDIO: return "SDIO";
-    default: return "unknown";
-  }
-}
+void plat_count_start();
 void platform_service_save();
 void plat_flush_save();
 
@@ -137,8 +123,10 @@ void setup() {
   Serial.begin(115200);
   Serial.printf("\n[sys] FlightScnr CYD %s - port of FlightScnr Pi by Yash Mulgaonkar (CC BY-NC-SA 4.0)\n",
                 FS_VERSION);
-  Serial.printf("[boot] last reset: %s, heap %u\n", reset_reason_name(esp_reset_reason()),
-                (unsigned)plat_free_heap());
+  plat_count_start();
+  Serial.printf("[boot] last reset: %s, heap %u", plat_reset_reason(), (unsigned)plat_free_heap());
+  if (plat_restart_count()) Serial.printf("; restart %lu since power-on", (unsigned long)plat_restart_count());
+  Serial.println();
   pinMode(PIN_BOOT_KEY, INPUT_PULLUP);
   diag_init();
 
@@ -170,6 +158,10 @@ void setup() {
   net_init();
   /* Last, so it isn't carved out of the start-up stages' memory. */
   mem_guard_init(10 * 1024);
+  /* From here on a screen that stops coming round (a hang in drawing, a
+   * deadlock) restarts the board instead of freezing until someone pulls
+   * the plug. The start-up above may legitimately take longer. */
+  enableLoopWDT();
   Serial.printf("[sys] ready, heap %u (min %u)\n", (unsigned)plat_free_heap(), (unsigned)plat_min_free_heap());
 }
 

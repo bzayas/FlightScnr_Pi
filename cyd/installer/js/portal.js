@@ -26,7 +26,11 @@ async function j(url, opts) {
     throw new Error(e.name === 'TimeoutError' ? 'no answer in time' : 'no answer');
   }
   const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+  if (!res.ok) {
+    const err = new Error(data.error || `HTTP ${res.status}`);
+    err.locked = data.locked === true;
+    throw err;
+  }
   return data;
 }
 
@@ -36,7 +40,7 @@ async function retry(fn, tries = 3) {
     try {
       return await fn();
     } catch (e) {
-      if (i >= tries) throw e;
+      if (i >= tries || e.locked) throw e;
       await new Promise((r) => setTimeout(r, 1500 * i));
     }
   }
@@ -74,7 +78,8 @@ class PortalUI extends SettingsUI {
           this.row('Name', null, h('span', { class: 'value' }, s.device)),
           this.row('Firmware', null, h('span', { class: 'value' }, s.version)),
           this.row('Board', null, h('span', { class: 'value' }, s.board)),
-          this.row('Up for', null, h('span', { class: 'value' }, fmtUptime(s.uptime_s || 0))),
+          this.row('Up for', s.restarts ? `Restarted by itself ${s.restarts} time${s.restarts === 1 ? '' : 's'} since it was last powered on` : null, h('span', { class: 'value' }, fmtUptime(s.uptime_s || 0))),
+          this.row('Last start', null, h('span', { class: 'value' }, s.reset || '—')),
           this.row('Memory free', `Lowest since boot: ${Math.round((s.heap_min || 0) / 1024)} KB`, h('span', { class: 'value' }, `${Math.round((s.heap || 0) / 1024)} KB`)),
         ]),
         this.group('Network', [
@@ -213,6 +218,14 @@ async function boot() {
     baseline = normalize(cfg);
     if (st) document.getElementById('devname').textContent = st.device;
   } catch (e) {
+    if (e.locked) {
+      nav.replaceChildren();
+      main.replaceChildren(
+        h('h1', {}, 'The portal is locked'),
+        h('p', { class: 'muted' }, 'This display only accepts changes on its own screen. To use this page, swipe to Settings on the display and turn off Lock portal.'),
+        h('p', { class: 'muted' }, 'The display keeps running as usual.'));
+      return;
+    }
     main.replaceChildren(h('div', { class: 'note err' }, h('span', {}, '⚠️'), h('p', {}, `Couldn’t reach the display: ${e.message}. Reload to try again.`)));
     return;
   }

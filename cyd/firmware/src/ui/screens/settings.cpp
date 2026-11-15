@@ -31,6 +31,7 @@
 #include "ui/nav.h"
 #include "ui/radar.h"
 #include "ui/theme.h"
+#include "ui/ui.h"
 #include "ui/widgets.h"
 
 /* ---- the list --------------------------------------------------------------- */
@@ -39,7 +40,7 @@ enum Id : uint8_t {
   THEME, ACCENT, DAY, NIGHT, FACE, ORIENT,
   RANGE, SWEEP, LABELS, LINES, PCOLOR, RWY, ALERTS,
   TEMP, DIST, ALT, SPEED, H24,
-  WIFI, PORTAL, AP, REFRESH,
+  WIFI, PORTAL, PLOCK, AP, REFRESH,
   CAL, ABOUT, RESTART,
 };
 enum Kind : uint8_t { K_SEG, K_ACCENT, K_SLIDER, K_VALUE, K_SWITCH, K_ACTION, K_INFO };
@@ -77,6 +78,7 @@ static const Item ITEMS[] = {
 
     {WIFI, K_INFO, SYM_WIFI, T_BLUE, "Wi-Fi", false},
     {PORTAL, K_VALUE, SYM_GLOBE, T_TEAL, "Portal", true},
+    {PLOCK, K_SWITCH, SYM_GLOBE, T_GRAY, "Lock portal", false},
     {AP, K_ACTION, SYM_SIGNAL, T_ORANGE, "Start setup hotspot", false},
     {REFRESH, K_ACTION, SYM_REFRESH, T_GREEN, "Refresh data now", false},
 
@@ -91,7 +93,7 @@ struct Section {
   uint8_t first, count;
 };
 static const Section SECTIONS[] = {
-    {"APPEARANCE", 0, 6}, {"RADAR", 6, 7}, {"UNITS", 13, 5}, {"NETWORK", 18, 4}, {"SYSTEM", 22, 3},
+    {"APPEARANCE", 0, 6}, {"RADAR", 6, 7}, {"UNITS", 13, 5}, {"NETWORK", 18, 5}, {"SYSTEM", 23, 3},
 };
 static const int N_SECTIONS = sizeof(SECTIONS) / sizeof(SECTIONS[0]);
 
@@ -191,6 +193,7 @@ static bool switch_on(uint8_t id) {
     case RWY: return g_cfg.runways;
     case ALERTS: return g_cfg.al_military || g_cfg.al_tracked || g_cfg.al_watch || g_cfg.al_emergency;
     case H24: return g_cfg.clock24;
+    case PLOCK: return g_cfg.portal_lock;
     default: return false;
   }
 }
@@ -524,7 +527,8 @@ static void open_portal() {
   }
   char msg[200];
   if (ns.connected)
-    snprintf(msg, sizeof(msg), "Scan or open\nhttp://%s", ns.ip);
+    snprintf(msg, sizeof(msg), g_cfg.portal_lock ? "Scan or open\nhttp://%s\nLocked: it shows status only" : "Scan or open\nhttp://%s",
+             ns.ip);
   else if (ns.ap_mode)
     snprintf(msg, sizeof(msg), "Scan to join \"%s\"\n(password %s), then open http://192.168.4.1", ns.ap_ssid,
              ns.ap_pass);
@@ -557,9 +561,19 @@ static void open_about() {
                         &fs_text_12, &ST_TEXT2);
   lv_obj_set_width(c, LV_PCT(100));
   lv_label_set_long_mode(c, LV_LABEL_LONG_WRAP);
-  snprintf(buf, sizeof(buf), "Free memory %lu KB (low %lu KB)", (unsigned long)(plat_free_heap() / 1024),
-           (unsigned long)(plat_min_free_heap() / 1024));
-  w_label(body, buf, &fs_text_12, &ST_TEXT2);
+  /* health: how long it has run, whether it restarted itself, and memory */
+  uint32_t up = plat_uptime_s(), restarts = plat_restart_count();
+  char since[24];
+  if (up >= 86400)
+    snprintf(since, sizeof(since), "%lu d %lu h", (unsigned long)(up / 86400), (unsigned long)(up % 86400 / 3600));
+  else
+    snprintf(since, sizeof(since), "%lu h %lu min", (unsigned long)(up / 3600), (unsigned long)(up % 3600 / 60));
+  snprintf(buf, sizeof(buf), "Running for %s \xC2\xB7 last start: %s%s\nFree memory %lu KB (low %lu KB)", since,
+           plat_reset_reason(), restarts ? " \xC2\xB7 restarted itself since power-on" : "",
+           (unsigned long)(plat_free_heap() / 1024), (unsigned long)(plat_min_free_heap() / 1024));
+  lv_obj_t* hl = w_label(body, buf, &fs_text_12, &ST_TEXT2);
+  lv_obj_set_width(hl, LV_PCT(100));
+  lv_label_set_long_mode(hl, LV_LABEL_LONG_WRAP);
 }
 
 static void knob_anim(void*, int32_t v) {
@@ -573,6 +587,10 @@ static void toggle(int item) {
     case SWEEP: nav_post_patch("{\"radar\":{\"sweep\":%s}}", b); break;
     case RWY: nav_post_patch("{\"radar\":{\"runways\":%s}}", b); break;
     case H24: nav_post_patch("{\"units\":{\"clock24\":%s}}", b); break;
+    case PLOCK: /* only here, on the screen, can the portal be unlocked */
+      nav_post_patch("{\"portal\":{\"lock\":%s}}", b);
+      ui_toast(b[0] == 't' ? "Portal locked: status only" : "Portal unlocked");
+      break;
     case ALERTS:
       nav_post_patch("{\"alerts\":{\"military\":%s,\"emergency\":%s,\"tracked\":%s,\"watch_on\":%s}}", b, b, b, b);
       break;

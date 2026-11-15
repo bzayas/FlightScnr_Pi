@@ -27,3 +27,7 @@ void net_phase(const char* what, const char* host = nullptr);
 
 void diag_init();
 void diag_service();
+/* The network task calls this every time round its loop. If it stops for
+ * NET_STALL_S, something blocked that no timeout covered, and the board
+ * restarts rather than show stale data for ever. */
+void diag_net_beat();

@@ -16,6 +16,7 @@
 #include <WiFi.h>
 #include <esp_heap_caps.h>
 #include <esp_system.h>
+#include <esp_timer.h>
 #include <sys/time.h>
 
 #include "core/board.h"
@@ -108,6 +109,41 @@ const char* plat_device_name() {
   }
   return name;
 }
+
+uint32_t plat_uptime_s() { return (uint32_t)(esp_timer_get_time() / 1000000); }
+
+const char* plat_reset_reason() {
+  switch (esp_reset_reason()) {
+    case ESP_RST_POWERON: return "power on";
+    case ESP_RST_EXT: return "reset pin";
+    case ESP_RST_SW: return "software restart";
+    case ESP_RST_PANIC: return "CRASH (panic)";
+    case ESP_RST_INT_WDT: return "CRASH (interrupt watchdog)";
+    case ESP_RST_TASK_WDT: return "CRASH (task watchdog)";
+    case ESP_RST_WDT: return "CRASH (watchdog)";
+    case ESP_RST_DEEPSLEEP: return "deep sleep";
+    case ESP_RST_BROWNOUT: return "BROWNOUT (power supply dipped)";
+    case ESP_RST_SDIO: return "SDIO";
+    default: return "unknown";
+  }
+}
+
+/* Kept in RTC memory, which a restart leaves alone and a power cycle clears. */
+static RTC_NOINIT_ATTR uint32_t s_rtc_magic;
+static RTC_NOINIT_ATTR uint32_t s_rtc_restarts;
+static const uint32_t RTC_MAGIC = 0x46534359; /* "FSCY" */
+
+void plat_count_start() {
+  esp_reset_reason_t r = esp_reset_reason();
+  if (s_rtc_magic != RTC_MAGIC || r == ESP_RST_POWERON || r == ESP_RST_BROWNOUT || r == ESP_RST_EXT) {
+    s_rtc_magic = RTC_MAGIC;
+    s_rtc_restarts = 0;
+  } else {
+    s_rtc_restarts++;
+  }
+}
+
+uint32_t plat_restart_count() { return s_rtc_magic == RTC_MAGIC ? s_rtc_restarts : 0; }
 
 uint32_t plat_free_heap() { return heap_caps_get_free_size(MALLOC_CAP_8BIT); }
 void plat_mem_mark(const char* stage) {

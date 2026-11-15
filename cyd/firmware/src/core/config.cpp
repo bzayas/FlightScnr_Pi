@@ -346,6 +346,8 @@ bool cfg_apply_json(AppConfig& c, const char* json, size_t len, bool keep_blank)
       }
     }
   }
+  JsonObjectConst po = root["portal"];
+  if (!po.isNull()) get_bool(po["lock"], c.portal_lock);
   /* Normalise the tracked identity the same way as the watch list. */
   {
     char tmp[sizeof(c.track)];
@@ -438,6 +440,8 @@ size_t cfg_to_json(const AppConfig& c, char* out, size_t cap, bool secrets) {
   JsonArray wl = al["watch"].to<JsonArray>();
   for (int i = 0; i < CFG_MAX_WATCH; i++)
     if (c.watch[i][0]) wl.add(c.watch[i]);
+
+  doc["portal"]["lock"] = c.portal_lock;
 
   return serializeJson(doc, out, cap);
 }
