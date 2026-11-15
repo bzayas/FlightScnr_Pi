@@ -532,6 +532,7 @@ static bool fetch_aircraft(uint32_t icao) {
 /* ------------------------------------------------------------------------ */
 
 static uint32_t s_wx_next, s_fc_next, s_tomorrow_backoff_until;
+static bool s_tomorrow_backoff;
 
 static bool fetch_openmeteo(WeatherData& w) {
   char url[512];
@@ -585,13 +586,19 @@ static bool fetch_weather(bool forecast_due) {
   }
   bool use_tomorrow = nc.wx_provider == WX_TOMORROW || (nc.wx_provider == WX_AUTO && nc.key[0]);
   bool ok = false;
-  if (use_tomorrow && nc.key[0] && millis() >= s_tomorrow_backoff_until) {
+  /* signed difference: a plain >= left Tomorrow.io switched off for days
+   * once the millisecond counter wrapped past a back-off time */
+  if (s_tomorrow_backoff && (int32_t)(millis() - s_tomorrow_backoff_until) >= 0) s_tomorrow_backoff = false;
+  if (use_tomorrow && nc.key[0] && !s_tomorrow_backoff) {
     int code = fetch_tomorrow(w, forecast_due);
     ok = code == 200;
     if (!ok) {
       ModelGuard g;
       snprintf(g_model.wx_err, sizeof(g_model.wx_err), "Tomorrow.io: %s", http_reason(code));
-      if (code == 429) s_tomorrow_backoff_until = millis() + 10u * 60u * 1000u; /* Pi: 10 min backoff */
+      if (code == 429) { /* Pi: 10 min backoff */
+        s_tomorrow_backoff_until = millis() + 10u * 60u * 1000u;
+        s_tomorrow_backoff = true;
+      }
     }
   }
   /* Whatever was chosen, fall back to Open-Meteo rather than show nothing. */

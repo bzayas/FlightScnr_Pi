@@ -31,7 +31,7 @@
 /* Constants (scaled from the Pi's 390-unit dial: theme.py)                  */
 /* ------------------------------------------------------------------------ */
 
-static const float SWEEP_PERIOD_MS = 6000.0f; /* theme.SWEEP_PERIOD_MS */
+static const uint32_t SWEEP_PERIOD_MS = 6000; /* theme.SWEEP_PERIOD_MS */
 static const float TRAIL_DEG = 30.0f;          /* draw.draw_sweep_line default */
 static const int RING_COUNT = 3;
 static const float RANGE_LABEL_BEARING = 245.5f;
@@ -113,6 +113,16 @@ static bool s_covered;
 static bool quiet() { return s_dim != 255 || s_covered; }
 static bool sweeping() { return g_cfg.sweep && !quiet(); }
 static uint32_t s_tags_next_ms;
+static bool s_tags_due = true; /* re-place the tags on the next tick */
+/* Animation clock, in ms, modulo ANIM_WRAP_MS. The sweep, the pulses and the
+ * rotors are phases of this, never of the uptime counter itself: as a float
+ * that counter steps by 64 ms after six days and by 256 ms after 25, which
+ * made everything driven by it stutter the longer the display ran. Every
+ * period below divides ANIM_WRAP_MS, so nothing jumps when it wraps, and
+ * values under 2^24 are exact in a float. */
+static const uint32_t ANIM_WRAP_MS = 6000000;
+static uint32_t s_anim_ms, s_anim_last;
+static float anim_phase(uint32_t period_ms) { return (float)(s_anim_ms % period_ms) / (float)period_ms; }
 static RunwayPx s_rwy[MAX_RWY];
 static int s_nrwy;
 static AirportLabel s_apt[MAX_APT_LABELS];
@@ -228,10 +238,10 @@ static float angle_diff(float a, float b) { /* a - b in (-180, 180] */
   return d;
 }
 
-static lv_color_t track_color(const Track& t, uint32_t now) {
+static lv_color_t track_color(const Track& t) {
   const Palette& p = pal();
   const Flight& f = t.f;
-  bool blink = ((now / 500) & 1) != 0; /* Pi alert pulse */
+  bool blink = ((s_anim_ms / 500) & 1) != 0; /* Pi alert pulse */
   if (f.flags & FF_TRACKED) return p.tracked;
   if (f.flags & FF_EMERGENCY) return p.alert_mil;
   if (f.flags & FF_MILITARY) return blink ? p.alert_flash : p.alert_mil;
@@ -426,7 +436,7 @@ __attribute__((noinline)) static void sync_flights(uint32_t now) {
     }
     format_tag(*t);
   }
-  s_tags_next_ms = 0; /* re-place labels with the new data */
+  s_tags_due = true; /* re-place labels with the new data */
 }
 
 static void range_label(int ring, char* buf, size_t n) {
@@ -648,6 +658,8 @@ __attribute__((noinline)) static void update_tracks(float dt, float acx, float a
 
 static void radar_timer_cb(lv_timer_t*) {
   uint32_t now = plat_millis();
+  s_anim_ms = (s_anim_ms + (uint32_t)(now - s_anim_last) % ANIM_WRAP_MS) % ANIM_WRAP_MS;
+  s_anim_last = now;
   float dt = s_last_ms ? (now - s_last_ms) / 1000.0f : 0.033f;
   if (dt > 0.25f) dt = 0.25f;
   if (quiet() && s_last_ms && now - s_last_ms < 500) return;
@@ -662,7 +674,7 @@ static void radar_timer_cb(lv_timer_t*) {
       if (fabsf(g_cfg.range_nm - s_range_target) > 0.01f) radar_set_range(g_cfg.range_nm, true);
       for (auto& t : tracks())
         if (t.used) format_tag(t);
-      s_tags_next_ms = 0;
+      s_tags_due = true;
     }
     radar_invalidate_all();
   }
@@ -686,7 +698,7 @@ static void radar_timer_cb(lv_timer_t*) {
 
   /* sweep */
   float prev = s_sweep;
-  s_sweep = fmodf(now, SWEEP_PERIOD_MS) / SWEEP_PERIOD_MS * 360.0f;
+  s_sweep = anim_phase(SWEEP_PERIOD_MS) * 360.0f;
   if (sweeping()) {
     lv_area_t a;
     sweep_area(s_sweep, acx, acy, &a);
@@ -704,8 +716,9 @@ static void radar_timer_cb(lv_timer_t*) {
 
   update_tracks(dt, acx, acy, now, prev);
 
-  if (now >= s_tags_next_ms) {
+  if (s_tags_due || (int32_t)(now - s_tags_next_ms) >= 0) { /* signed: right across the 49.7-day wrap */
     place_tags();
+    s_tags_due = false;
     s_tags_next_ms = now + 700;
   }
   if (zooming) radar_invalidate_all();
@@ -904,7 +917,7 @@ static void draw_runways(Fx& f, lv_draw_ctx_t* dc, float acx, float acy) {
               acy + s_apt[i].y + 3, LV_TEXT_ALIGN_LEFT, false);
 }
 
-static void draw_tracks(Fx& f, lv_draw_ctx_t* dc, float acx, float acy, uint32_t now) {
+static void draw_tracks(Fx& f, lv_draw_ctx_t* dc, float acx, float acy) {
   const Palette& p = pal();
   const float isc = ui_compact() ? 0.8f : 1.0f; /* 2.8" radar: smaller icons */
   /* draw low traffic first so high-altitude jets sit on top */
@@ -927,11 +940,11 @@ static void draw_tracks(Fx& f, lv_draw_ctx_t* dc, float acx, float acy, uint32_t
     if (!fx_intersects(f, x - 36, y - 36, x + 36 + t.tag_w, y + 36)) continue;
     const AircraftIconMask& m = AIRCRAFT_ICONS[t.f.icon < ICON_COUNT ? t.f.icon : 0];
     const float side = m.side * isc; /* drawn icon size */
-    lv_color_t c = track_color(t, now);
+    lv_color_t c = track_color(t);
     uint8_t opa = (uint8_t)(255 * t.alpha * (t.rim ? 0.75f : 1.0f) * s_dim / 255);
 
     if (track_alerting(t.f) && !t.rim) {
-      float pulse = 0.5f + 0.5f * sinf(now * 0.0063f);
+      float pulse = 0.5f + 0.5f * sinf(anim_phase(1000) * 6.2831853f);
       fx_glow(f, x, y, 17.0f, c, (uint8_t)(opa * (0.25f + 0.25f * pulse)));
     }
     if (t.ping > 0) {
@@ -939,7 +952,7 @@ static void draw_tracks(Fx& f, lv_draw_ctx_t* dc, float acx, float acy, uint32_t
       fx_ring(f, x, y, pr, 0.9f, c, (uint8_t)(opa * t.ping * 0.6f));
     }
     if (t.f.icao == s_selected) {
-      float pulse = 0.5f + 0.5f * sinf(now * 0.008f);
+      float pulse = 0.5f + 0.5f * sinf(anim_phase(800) * 6.2831853f);
       fx_ring(f, x, y, side * 0.62f + 4 + pulse * 2, 1.2f, p.accent, opa);
     }
     fx_mask(f, m.alpha, m.side, x, y, t.hdg, isc, c, opa);
@@ -947,7 +960,7 @@ static void draw_tracks(Fx& f, lv_draw_ctx_t* dc, float acx, float acy, uint32_t
       float rr = side * 0.41f;
       float hx, hy;
       fx_polar(x, y, side * 0.14f, t.hdg, &hx, &hy);
-      float ang = fmodf(now * 0.576f, 180.0f);
+      float ang = anim_phase(300) * 180.0f;
       fx_disc(f, hx, hy, rr, c, (uint8_t)(opa * 0.16f));
       float ax, ay, bx, by;
       fx_polar(hx, hy, rr, ang, &ax, &ay);
@@ -983,14 +996,13 @@ static void draw_cb(lv_event_t* e) {
   if (!fx_begin(dc, f)) return;
   float acx, acy;
   abs_center(&acx, &acy);
-  uint32_t now = plat_millis();
   draw_disc(f, acx, acy);
   draw_runways(f, dc, acx, acy);
   draw_grid(f, dc, acx, acy);
   /* home marker */
   fx_ring(f, acx, acy, 3.5f, 0.8f, pal().accent, s_dim);
   fx_disc(f, acx, acy, 1.3f, pal().accent, s_dim);
-  draw_tracks(f, dc, acx, acy, now);
+  draw_tracks(f, dc, acx, acy);
 }
 
 static void event_cb(lv_event_t* e) {
@@ -1083,6 +1095,7 @@ void radar_set_range(float nm, bool animate) {
 }
 
 float radar_range() { return s_range_target; }
+float radar_sweep_deg() { return s_sweep; }
 
 void radar_cycle_range(int dir) {
   int idx = 0;
@@ -1099,7 +1112,7 @@ void radar_cycle_range(int dir) {
 
 void radar_select(uint32_t icao) {
   s_selected = icao;
-  s_tags_next_ms = 0;
+  s_tags_due = true;
 }
 uint32_t radar_selected() { return s_selected; }
 

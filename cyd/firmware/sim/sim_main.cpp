@@ -47,6 +47,7 @@
 #include "ui/ui.h"
 
 extern uint32_t g_sim_ms;
+extern uint32_t g_sim_start_ms;
 extern time_t g_sim_epoch;
 extern uint8_t g_sim_disclaimer;
 
@@ -133,9 +134,13 @@ static double cpu_now_ms() {
   return ts.tv_sec * 1e3 + ts.tv_nsec / 1e6;
 }
 
+/* The device's loop comes round every few milliseconds (main.cpp sleeps 5
+ * at most), so LVGL's 16 ms refresh and 20 ms touch reads run on time. */
+static const uint32_t STEP_MS = 4;
+
 static void run(uint32_t ms) {
-  for (uint32_t t = 0; t < ms; t += 16) {
-    g_sim_ms += 16;
+  for (uint32_t t = 0; t < ms; t += STEP_MS) {
+    g_sim_ms += STEP_MS;
     double t0 = cpu_now_ms();
     lv_timer_handler();
     s_cpu_ms += cpu_now_ms() - t0;
@@ -246,6 +251,13 @@ static int check_swipes() {
   int y = H / 2, step = W / 6;
   swipe(W * 2 / 3, -W / 20, y);
   expect("a nudge leaves the scope where it is", PAGE_FACE);
+  /* A nudge that short is a tap: on an aircraft it opens the flight sheet,
+   * on empty sky it zooms. Neither should colour the swipes that follow.
+   * (Held past the long-press time it would open Customize, which is why
+   * the simulator uses the device's 600 ms and not LVGL's 400.) */
+  detail_close();
+  radar_set_range(g_cfg.range_nm, false);
+  run(600);
   swipe(W * 2 / 3, -step, y);
   expect("a short swipe left goes to Traffic", PAGE_TRAFFIC);
   swipe(W * 2 / 3, -step, y);
@@ -387,6 +399,122 @@ static int check_editor() {
   ok("finger: Done closes it", !face_editor_active());
   s_touch.finger = finger;
   run(300);
+  return fails;
+}
+
+/* One finger gesture: down at (x0, y0), across (dx, dy) in `ms`, a short
+ * rest, up. Positions change every 8 ms, as a real finger's do between the
+ * panel's 20 ms reads. */
+static void gesture(int x0, int y0, int dx, int dy, int ms, int rest_ms) {
+  s_touch = {x0, y0, true, true};
+  run(24);
+  int steps = LV_MAX(1, ms / 8);
+  for (int i = 1; i <= steps; i++) {
+    s_touch.x = x0 + dx * i / steps;
+    s_touch.y = y0 + dy * i / steps;
+    run(8);
+  }
+  run((uint32_t)rest_ms);
+  s_touch.pressed = false;
+  run(700);
+}
+
+/* Hundreds of swipes, taps and scroll drags the way a fingertip makes them
+ * (off-target first contact, dropped samples, jitter), each at a random
+ * moment, speed, length and drift. Every page swipe of 16% of the width or
+ * more must turn the page; no tap may; a vertical drag must scroll Sky and
+ * stay on it. FS_STRESS_SEED tries another sequence. */
+static int check_touch_stress() {
+  uint32_t rng = getenv("FS_STRESS_SEED") ? (uint32_t)strtoul(getenv("FS_STRESS_SEED"), nullptr, 10) : 20261115u;
+  auto rnd = [&](int n) {
+    rng = rng * 1664525u + 1013904223u;
+    return (int)((rng >> 8) % (uint32_t)n);
+  };
+  const bool verbose = getenv("FS_STRESS_VERBOSE") != nullptr;
+  int swipes = 0, swipes_ok = 0, taps = 0, taps_ok = 0, drags = 0, drags_ok = 0;
+  detail_close();
+  run(400);
+  for (int i = 0; i < 160; i++) {
+    bool left = i & 1; /* scope -> Traffic, then back */
+    nav_goto(left ? PAGE_FACE : PAGE_TRAFFIC, false);
+    run(300 + (uint32_t)rnd(40));
+    int d = W * (16 + rnd(22)) / 100, ms = 90 + rnd(380);
+    int dy = d * (rnd(101) - 50) / 100; /* drifts up or down by up to half as much */
+    int x0 = left ? W - 20 - rnd(W / 3) : 20 + rnd(W / 3), y0 = H / 4 + rnd(H / 2);
+    gesture(x0, y0, left ? -d : d, dy, ms, 20 + rnd(120));
+    uint8_t want = left ? PAGE_TRAFFIC : PAGE_FACE;
+    swipes++;
+    if (nav_current() == want && !face_editor_active())
+      swipes_ok++;
+    else if (verbose)
+      printf("    swipe %d failed: %s from x %d y %d, %d px (drift %d) in %d ms -> page %u\n", i, left ? "left" : "right", x0,
+             y0, d, dy, ms, nav_current());
+    detail_close();
+    face_editor_close();
+  }
+  nav_goto(PAGE_SKY, false);
+  run(400);
+  lv_obj_t* sky = lv_obj_get_child(lv_obj_get_child(lv_obj_get_child(lv_scr_act(), 0), PAGE_SKY), 0);
+  for (int i = 0; i < 80; i++) { /* taps: a little wobble, held 60-300 ms */
+    lv_obj_scroll_to_y(sky, 0, LV_ANIM_OFF);
+    run(60 + (uint32_t)rnd(40));
+    gesture(30 + rnd(W - 60), 40 + rnd(H - 80), rnd(9) - 4, rnd(9) - 4, 40 + rnd(120), 20 + rnd(140));
+    taps++;
+    if (nav_current() == PAGE_SKY && lv_obj_get_scroll_y(sky) == 0)
+      taps_ok++;
+    else if (verbose)
+      printf("    tap %d moved the page: page %u scroll %d\n", i, nav_current(), (int)lv_obj_get_scroll_y(sky));
+    nav_goto(PAGE_SKY, false);
+  }
+  for (int i = 0; i < 80; i++) { /* scrolling Sky: up by a quarter to a half of the screen, wandering sideways */
+    lv_obj_scroll_to_y(sky, 0, LV_ANIM_OFF);
+    run(60 + (uint32_t)rnd(40));
+    int d = H * (25 + rnd(26)) / 100, dx = d * (rnd(61) - 30) / 100;
+    gesture(W / 4 + rnd(W / 2), H - 30 - rnd(H / 6), dx, -d, 120 + rnd(400), 20 + rnd(120));
+    drags++;
+    if (nav_current() == PAGE_SKY && lv_obj_get_scroll_y(sky) > 10)
+      drags_ok++;
+    else if (verbose)
+      printf("    drag %d: page %u scroll %d (%d px up, %d sideways)\n", i, nav_current(), (int)lv_obj_get_scroll_y(sky), d, dx);
+    nav_goto(PAGE_SKY, false);
+  }
+  lv_obj_scroll_to_y(sky, 0, LV_ANIM_OFF);
+  s_touch.finger = false;
+  nav_goto(PAGE_FACE, false);
+  run(400);
+  int fails = 0;
+  auto line = [&](const char* what, int ok, int n) {
+    printf("  touch: %-45s %s (%d of %d)\n", what, ok == n ? "ok" : "FAIL", ok, n);
+    if (ok != n) fails++;
+  };
+  line("finger swipes turn the page", swipes_ok, swipes);
+  line("finger taps leave it alone", taps_ok, taps);
+  line("finger drags scroll Sky, not the pages", drags_ok, drags);
+  return fails;
+}
+
+/* Motion must not depend on how long the display has been running: the
+ * sweep advances by the same small step on every radar tick, after 40 days
+ * as on the first, and straight through the 32-bit millisecond wrap. */
+static int check_motion() {
+  int fails = 0;
+  nav_goto(PAGE_FACE, false);
+  run(400);
+  float prev = radar_sweep_deg(), worst = 0;
+  int moved = 0;
+  for (int i = 0; i < 190; i++) { /* three seconds */
+    run(16);
+    float a = radar_sweep_deg(), d = a - prev;
+    if (d < 0) d += 360.0f;
+    if (d > worst) worst = d;
+    if (d > 0.01f) moved++;
+    prev = a;
+  }
+  /* a 30 ms radar timer on 16 ms steps: 1.92 degrees every other step */
+  bool smooth = worst <= 2.5f && moved >= 85;
+  printf("  motion: %-44s %s (largest step %.2f deg, %d updates in 3 s, uptime %.1f days)\n",
+         "the sweep moves in small, even steps", smooth ? "ok" : "FAIL", worst, moved, g_sim_ms / 86400000.0);
+  if (!smooth) fails++;
   return fails;
 }
 
@@ -786,11 +914,10 @@ static int run_gallery() {
   lv_init();
   s_fb = (uint16_t*)calloc((size_t)W * H, 2);
   /* the device's band height (main.cpp: two 7680-byte buffers) */
-  const int lines = LV_MAX(8, (getenv("FS_BUF") ? atoi(getenv("FS_BUF")) : 7680) / (W * 2));
-  s_buf1 = (lv_color_t*)malloc(sizeof(lv_color_t) * W * lines);
-  s_buf2 = (lv_color_t*)malloc(sizeof(lv_color_t) * W * lines);
+  s_buf1 = (lv_color_t*)malloc(sizeof(lv_color_t) * W * 32);
+  s_buf2 = (lv_color_t*)malloc(sizeof(lv_color_t) * W * 32);
   static lv_disp_draw_buf_t db;
-  lv_disp_draw_buf_init(&db, s_buf1, s_buf2, (uint32_t)W * lines);
+  lv_disp_draw_buf_init(&db, s_buf1, s_buf2, (uint32_t)W * 32);
   static lv_disp_drv_t dd;
   lv_disp_drv_init(&dd);
   dd.hor_res = (lv_coord_t)W;
@@ -925,6 +1052,9 @@ int main(int argc, char** argv) {
     if (!strcmp(argv[i], "--out") && i + 1 < argc) s_out = argv[++i];
     if (!strcmp(argv[i], "--gallery")) gallery = true;
     if (!strcmp(argv[i], "--bench")) benchmark = true;
+    /* start with this much uptime on the clock: 3456000000 is 40 days,
+     * 4294960000 wraps the 32-bit counter seven seconds into the run */
+    if (!strcmp(argv[i], "--uptime-ms") && i + 1 < argc) g_sim_ms = g_sim_start_ms = (uint32_t)strtoul(argv[++i], nullptr, 10);
   }
   mkdir(s_out, 0755);
   if (small) {
@@ -957,10 +1087,13 @@ int main(int argc, char** argv) {
 
   lv_init();
   s_fb = (uint16_t*)calloc((size_t)W * H, 2);
-  s_buf1 = (lv_color_t*)malloc(sizeof(lv_color_t) * W * 32);
-  s_buf2 = (lv_color_t*)malloc(sizeof(lv_color_t) * W * 32);
+  /* the device's band height (main.cpp: two 7680-byte buffers), so every
+   * run draws in the same bands the panel does */
+  const int lines = LV_MAX(8, (getenv("FS_BUF") ? atoi(getenv("FS_BUF")) : 7680) / (W * 2));
+  s_buf1 = (lv_color_t*)malloc(sizeof(lv_color_t) * W * lines);
+  s_buf2 = (lv_color_t*)malloc(sizeof(lv_color_t) * W * lines);
   static lv_disp_draw_buf_t db;
-  lv_disp_draw_buf_init(&db, s_buf1, s_buf2, (uint32_t)W * 32);
+  lv_disp_draw_buf_init(&db, s_buf1, s_buf2, (uint32_t)W * lines);
   static lv_disp_drv_t dd;
   lv_disp_drv_init(&dd);
   dd.hor_res = (lv_coord_t)W;
@@ -974,6 +1107,8 @@ int main(int argc, char** argv) {
   id.read_cb = touch_cb;
   id.scroll_limit = 12; /* as on the device (hal/display.cpp) */
   id.scroll_throw = 8;
+  id.gesture_limit = 40;
+  id.long_press_time = 600;
   lv_indev_drv_register(&id);
 
   load_mock(g_sim_epoch);
@@ -997,7 +1132,7 @@ int main(int argc, char** argv) {
          s_frames ? (double)s_flushed_px / s_frames * 16 / 40e6 * 1000 : 0.0);
 
   /* daytime: auto theme fades to the light palette */
-  g_sim_epoch = utc_from_civil(2026, 10, 7, 0, 25, 0) - (g_sim_ms - 1000) / 1000;
+  g_sim_epoch = utc_from_civil(2026, 10, 7, 0, 25, 0) - (uint32_t)(g_sim_ms - g_sim_start_ms) / 1000;
   run(12000); /* sun check is cached for 10 s, then a 1.5 s crossfade */
   shot("03_scope_instruments_day");
 
@@ -1113,7 +1248,16 @@ int main(int argc, char** argv) {
   run(800);
   face_editor_close();
   run(600);
-  int swipe_fails = check_swipes() + check_settings() + check_editor();
+  /* one after another: the order of calls in a sum is the compiler's choice */
+  int swipe_fails = 0;
+  const char* order = getenv("FS_CHECK_ORDER") ? getenv("FS_CHECK_ORDER") : "mwsetm";
+  for (const char* c = order; *c; c++) {
+    if (*c == 'm') swipe_fails += check_motion();
+    if (*c == 'w') swipe_fails += check_swipes();
+    if (*c == 's') swipe_fails += check_settings();
+    if (*c == 'e') swipe_fails += check_editor();
+    if (*c == 't') swipe_fails += check_touch_stress();
+  }
 
   ui_start_calibration();
   run(800);

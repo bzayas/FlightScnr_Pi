@@ -158,10 +158,12 @@ static void norm(const char* in, char* out, size_t n) {
 
 bool ident_matches(const Flight& f, const char* token) {
   if (!token || !token[0]) return false;
-  char reg[12];
+  char reg[12], cs[12], type[12];
   norm(f.reg, reg, sizeof(reg));
-  return strcmp(f.callsign, token) == 0 || (reg[0] && strcmp(reg, token) == 0) ||
-         (f.type[0] && strcmp(f.type, token) == 0);
+  norm(f.callsign, cs, sizeof(cs));
+  norm(f.type, type, sizeof(type));
+  return (cs[0] && strcmp(cs, token) == 0) || (reg[0] && strcmp(reg, token) == 0) ||
+         (type[0] && strcmp(type, token) == 0);
 }
 
 void aircraft_classify(Flight& f) {
