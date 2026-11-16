@@ -240,9 +240,14 @@ static void arc_box(float cx, float cy, float r, float hw, float a0, float span,
 
 static void arc_impl(Fx& f, float cx, float cy, float r, float hw, float a0, float a1, const lv_color_t* stops,
                      int nstops, lv_color_t c, uint8_t opa, bool caps) {
+  if (!isfinite(a0) || !isfinite(a1)) return; /* nothing sensible to draw, and no loop to get stuck in */
   float span = a1 - a0;
-  while (span < 0) span += 360.0f;
+  if (span < 0) {
+    span = fmodf(span, 360.0f);
+    if (span < 0) span += 360.0f;
+  }
   if (span > 360.0f) span = 360.0f;
+  a0 = fmodf(a0, 360.0f); /* (-360, 360): the per-pixel test below needs no loop */
   float ro = r + hw + 1;
   float bx0, by0, bx1, by1;
   arc_box(cx, cy, r, hw, a0, span, &bx0, &by0, &bx1, &by1);
@@ -260,9 +265,10 @@ static void arc_impl(Fx& f, float cx, float cy, float r, float hw, float a0, flo
       float dist = sqrtf(d2);
       uint32_t cv = cov255(fabsf(dist - r) - hw);
       if (!cv) continue;
-      float th = fx_fast_atan2_deg(dx, dy) - a0;
-      while (th < 0) th += 360.0f;
-      while (th >= 360.0f) th -= 360.0f;
+      float th = fx_fast_atan2_deg(dx, dy) - a0; /* (0, 360) - (-360, 360) */
+      if (th < 0) th += 360.0f;
+      if (th < 0) th += 360.0f;
+      if (th >= 360.0f) th -= 360.0f;
       if (th > span) continue;
       if (!caps && span < 359.5f) { /* soft butt ends */
         float e = fminf(th, span - th) * deg2rad * dist;

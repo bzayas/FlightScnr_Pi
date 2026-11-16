@@ -15,10 +15,19 @@
 #include <esp_freertos_hooks.h>
 #include <esp_task_wdt.h>
 
+#include "core/platform.h"
+
 /* The stock 5 s is shorter than a slow TLS handshake on a weak signal plus
  * a feed parse; a real hang still resets the board, just later. */
 static const uint32_t WDT_TIMEOUT_S = 15;
 static const uint32_t BUSY_REPORT_MS = 2500;
+
+/* Longer than the slowest legitimate request (a forecast on a bad link:
+ * two connection attempts, a slow body, the mbedtls fallback). */
+static const uint32_t NET_STALL_S = 5 * 60;
+static volatile uint32_t s_net_beat;
+
+void diag_net_beat() { s_net_beat = millis() | 1; }
 
 static volatile const char* s_phase = "start";
 static char s_host[40];
@@ -43,6 +52,12 @@ void diag_service() {
   static uint32_t seen, since, busy_from;
   static bool told;
   uint32_t now = millis(), n = s_idle0;
+  uint32_t beat = s_net_beat;
+  if (beat && (int32_t)(now - beat) > (int32_t)(NET_STALL_S * 1000)) {
+    Serial.printf("[diag] the network task has been stuck in \"%s\" %s for %lu s - restarting\n", (const char*)s_phase,
+                  s_host, (unsigned long)((now - beat) / 1000));
+    plat_reboot();
+  }
   if (n != seen) {
     if (told)
       Serial.printf("[diag] core 0 idle again after %lu ms (net: %s %s)\n", (unsigned long)(now - busy_from),

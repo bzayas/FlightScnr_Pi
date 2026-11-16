@@ -11,8 +11,10 @@
 
 #include "net.h"
 
+#include <Preferences.h>
 #include <WiFi.h>
 #include <esp_heap_caps.h>
+#include <esp_random.h>
 #include <esp_system.h>
 #include <esp_wifi.h>
 
@@ -97,6 +99,8 @@ static bool s_ap;
 static char s_ap_ssid[33], s_ap_pass[16];
 static uint32_t s_connected_since, s_disconnected_since, s_last_begin, s_ap_since;
 static bool s_was_connected;
+static bool s_ever_connected; /* since this start */
+static uint32_t s_data_ok_ms, s_rejoin_ms;
 static bool s_time_started;
 static volatile bool s_reconnect_requested;
 static volatile bool s_ap_requested;
@@ -117,23 +121,39 @@ void net_set_wifi(const char* ssid, const char* pass) {
   s_reconnect_requested = true;
 }
 
+/* The setup hotspot's password: ten random characters, made once and kept
+ * (shown on the screen and in its QR code; a factory reset makes a new one).
+ * It used to be derived from the MAC address, which the hotspot broadcasts,
+ * so anyone in range could work it out. Call with Wi-Fi started: that is
+ * what gives the hardware random number generator its entropy. */
 static void make_ap_credentials() {
-  uint8_t mac[6];
-  WiFi.macAddress(mac);
   snprintf(s_ap_ssid, sizeof(s_ap_ssid), "%s", plat_device_name());
-  /* Stable per-device password (shown on screen + QR code). */
-  uint32_t h = fs_crc32(mac, 6);
-  snprintf(s_ap_pass, sizeof(s_ap_pass), "fs%08lu", (unsigned long)(h % 100000000UL));
+  static const char alphabet[] = "abcdefghjkmnpqrstuvwxyz23456789"; /* no i, l, o, 0, 1 */
+  const size_t len = 10; /* 31^10: about 50 bits */
+  Preferences p;
+  p.begin("fs_state", false);
+  String stored = p.isKey("appw") ? p.getString("appw", "") : String(); /* isKey: no error line on a first start */
+  bool ok = stored.length() == len;
+  for (size_t i = 0; ok && i < len; i++) ok = strchr(alphabet, stored[i]) != nullptr;
+  if (ok) {
+    snprintf(s_ap_pass, sizeof(s_ap_pass), "%s", stored.c_str());
+  } else {
+    for (size_t i = 0; i < len; i++) s_ap_pass[i] = alphabet[esp_random() % (sizeof(alphabet) - 1)];
+    s_ap_pass[len] = 0;
+    p.putString("appw", s_ap_pass);
+  }
+  p.end();
 }
 
 static void ap_start() {
   if (s_ap) return;
   WiFi.mode(WIFI_AP_STA);
-  WiFi.softAP(s_ap_ssid, s_ap_pass, 6, 0, 4);
+  WiFi.softAP(s_ap_ssid, s_ap_pass, 6, 0, 2); /* WPA2; two clients are plenty for setting up */
   s_ap = true;
   s_ap_since = millis();
   portal_captive(true);
-  Serial.printf("[net] setup AP \"%s\" (%s) at %s\n", s_ap_ssid, s_ap_pass, WiFi.softAPIP().toString().c_str());
+  /* the password is on the display's screen, not in the log */
+  Serial.printf("[net] setup AP \"%s\" at %s\n", s_ap_ssid, WiFi.softAPIP().toString().c_str());
 }
 
 static void ap_stop() {
@@ -153,6 +173,7 @@ static void sta_begin() {
 
 static void on_connected() {
   s_connected_since = millis();
+  s_ever_connected = true;
   Serial.printf("[net] Wi-Fi connected: %s  rssi %d\n", WiFi.localIP().toString().c_str(), WiFi.RSSI());
   if (!s_time_started) {
     configTzTime(nc.posix[0] ? nc.posix : "UTC0", "pool.ntp.org", "time.google.com", "time.cloudflare.com");
@@ -208,10 +229,29 @@ static void wifi_service() {
       ap_start(); /* not provisioned: setup AP + Improv straight away */
     } else {
       if (now - s_last_begin > 20000) sta_begin();
-      if (!s_ap && now - s_disconnected_since > 45000) ap_start();
+      /* Can't join: open the setup hotspot so the Wi-Fi settings can be
+       * fixed. Soon when it has never been online since it started (a new
+       * password, a typo); only after five minutes when it was (a router
+       * restarting, an outage), so a passing dropout doesn't put a second
+       * network on the air. Settings > Start setup hotspot opens it at once. */
+      const uint32_t patience = s_ever_connected ? 5u * 60u * 1000u : 45000u;
+      if (!s_ap && now - s_disconnected_since > patience) ap_start();
     }
-  } else if (s_ap && now - s_connected_since > 120000 && WiFi.softAPgetStationNum() == 0) {
-    ap_stop(); /* configured and online: tidy up the setup network */
+  } else {
+    if (s_ap && now - s_connected_since > 120000 && WiFi.softAPgetStationNum() == 0)
+      ap_stop(); /* configured and online: tidy up the setup network */
+    /* "Connected" with nothing getting through (a router that restarted and
+     * forgot us, a stale lease) can last until someone pulls the plug. After
+     * a quarter of an hour without a single flight update, join again; at
+     * most every half hour, since the internet may simply be down. */
+    uint32_t since = s_data_ok_ms ? s_data_ok_ms : s_connected_since;
+    if (has_location() && nc.sources[0] != SRC_NONE && now - since > 15u * 60u * 1000u &&
+        now - s_rejoin_ms > 30u * 60u * 1000u) {
+      s_rejoin_ms = now;
+      Serial.println("[net] no flight data for 15 minutes: joining Wi-Fi again");
+      WiFi.disconnect(false, false);
+      sta_begin();
+    }
   }
 
   ModelGuard g;
@@ -532,6 +572,7 @@ static bool fetch_aircraft(uint32_t icao) {
 /* ------------------------------------------------------------------------ */
 
 static uint32_t s_wx_next, s_fc_next, s_tomorrow_backoff_until;
+static bool s_tomorrow_backoff;
 
 static bool fetch_openmeteo(WeatherData& w) {
   char url[512];
@@ -585,13 +626,19 @@ static bool fetch_weather(bool forecast_due) {
   }
   bool use_tomorrow = nc.wx_provider == WX_TOMORROW || (nc.wx_provider == WX_AUTO && nc.key[0]);
   bool ok = false;
-  if (use_tomorrow && nc.key[0] && millis() >= s_tomorrow_backoff_until) {
+  /* signed difference: a plain >= left Tomorrow.io switched off for days
+   * once the millisecond counter wrapped past a back-off time */
+  if (s_tomorrow_backoff && (int32_t)(millis() - s_tomorrow_backoff_until) >= 0) s_tomorrow_backoff = false;
+  if (use_tomorrow && nc.key[0] && !s_tomorrow_backoff) {
     int code = fetch_tomorrow(w, forecast_due);
     ok = code == 200;
     if (!ok) {
       ModelGuard g;
       snprintf(g_model.wx_err, sizeof(g_model.wx_err), "Tomorrow.io: %s", http_reason(code));
-      if (code == 429) s_tomorrow_backoff_until = millis() + 10u * 60u * 1000u; /* Pi: 10 min backoff */
+      if (code == 429) { /* Pi: 10 min backoff */
+        s_tomorrow_backoff_until = millis() + 10u * 60u * 1000u;
+        s_tomorrow_backoff = true;
+      }
     }
   }
   /* Whatever was chosen, fall back to Open-Meteo rather than show nothing. */
@@ -656,6 +703,7 @@ static void net_task(void*) {
         s_refresh |= NET_REFRESH_ALL;
       }
     }
+    diag_net_beat(); /* still coming round: the UI restarts the board if this stops for minutes */
     wifi_service();
     mem_report();
     uint32_t now = millis();
@@ -678,6 +726,7 @@ static void net_task(void*) {
     if ((int32_t)(now - next_flights) >= 0) {
       net_phase("flights");
       bool ok = fetch_flights();
+      if (ok) s_data_ok_ms = millis() | 1;
       next_flights = millis() + (ok ? nc.poll_s * 1000u : 15000u);
     } else if ((int32_t)(now - s_wx_next) >= 0 || (int32_t)(now - s_fc_next) >= 0) {
       bool fc_due = (int32_t)(now - s_fc_next) >= 0;
@@ -713,10 +762,10 @@ static void net_task(void*) {
 
 void net_init() {
   snapshot_cfg();
-  make_ap_credentials();
-  WiFi.persistent(false);
+  WiFi.persistent(false); /* credentials live in our settings only, not in the Wi-Fi driver's store as well */
   WiFi.setHostname(nc.host[0] ? nc.host : "flightscnr");
   WiFi.mode(WIFI_STA);
+  make_ap_credentials(); /* after Wi-Fi is up: its radio feeds the random number generator */
   plat_mem_mark("wifi");
   if (esp_reset_reason() == ESP_RST_BROWNOUT) {
     /* Weak USB supply: transmit power peaks are what pull the rail down. */

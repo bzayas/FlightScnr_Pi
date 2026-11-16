@@ -100,6 +100,10 @@ struct AppConfig {
   uint16_t quake_km;
   char watch[CFG_MAX_WATCH][12];
   char track[12]; /* tracked flight: callsign or registration */
+
+  /* Portal: when locked it shows status only; settings change on the display
+   * (or over USB). Reaching it through the setup hotspot still works. */
+  bool portal_lock;
 };
 
 extern AppConfig g_cfg;

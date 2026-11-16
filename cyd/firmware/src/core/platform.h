@@ -64,6 +64,10 @@ void plat_start_setup_ap();
 void plat_refresh_data();
 
 const char* plat_device_name(); /* e.g. FlightScnr-1A2B */
+/* Health, for About and the portal's status page. */
+uint32_t plat_uptime_s();         /* since this start; doesn't wrap at 49.7 days */
+uint32_t plat_restart_count();    /* restarts since the display was last powered on */
+const char* plat_reset_reason();  /* why it last started: "power on", "CRASH (task watchdog)", ... */
 uint32_t plat_free_heap();
 uint32_t plat_min_free_heap();
 /* Log free memory after a start-up stage (boot diagnostics). */

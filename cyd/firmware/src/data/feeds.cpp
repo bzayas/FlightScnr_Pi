@@ -34,14 +34,18 @@ void feed_aircraft_filter(JsonDocument& f) {
   for (auto k : keys) f[k] = true;
 }
 
+/* Identifiers from a feed (callsign, registration, type, squawk) end up in
+ * request URLs, in JSON written back to the settings and on the screen, so
+ * only letters, digits and '-' are kept: nothing a feed sends can reach
+ * outside its field. */
 template <size_t N>
-static void copy_trim(char (&dst)[N], const char* src, bool upper) {
+static void copy_ident(char (&dst)[N], const char* src) {
   size_t j = 0;
-  if (src) {
-    while (*src == ' ') src++;
-    for (; *src && j < N - 1; src++) dst[j++] = upper ? (char)toupper((unsigned char)*src) : *src;
-  }
-  while (j && dst[j - 1] == ' ') j--;
+  if (src)
+    for (; *src && j < N - 1; src++) {
+      unsigned char c = (unsigned char)*src;
+      if (isalnum(c) || c == '-') dst[j++] = (char)toupper(c);
+    }
   dst[j] = 0;
 }
 
@@ -50,20 +54,31 @@ static float num_or(JsonVariantConst v, float dflt) {
   return dflt;
 }
 
+/* A number from a feed, or `dflt` when it's missing, not finite or outside
+ * what the quantity can be. Everything downstream (dead reckoning, gauges,
+ * text) can then trust its inputs. */
+static float num_in(JsonVariantConst v, float lo, float hi, float dflt) {
+  float x = num_or(v, NAN);
+  return (x >= lo && x <= hi) ? x : dflt; /* NaN fails both comparisons */
+}
+
+/* Air temperature in C: the records are -89 and +57. */
+static float temp_in(JsonVariantConst v, float dflt) { return num_in(v, -95, 65, dflt); }
+
 bool feed_parse_aircraft(JsonObjectConst o, Flight& f, uint32_t now_ms) {
   JsonVariantConst lat = o["lat"], lon = o["lon"];
   if (!(lat.is<float>() || lat.is<long>()) || !(lon.is<float>() || lon.is<long>())) return false;
   float la = lat.as<float>(), lo = lon.as<float>();
-  if (fabsf(la) > 90 || fabsf(lo) > 180 || (fabsf(la) < 0.01f && fabsf(lo) < 0.01f)) return false;
+  if (!(fabsf(la) <= 90) || !(fabsf(lo) <= 180) || (fabsf(la) < 0.01f && fabsf(lo) < 0.01f)) return false;
 
   memset(&f, 0, sizeof(f));
   const char* hex = o["hex"] | "";
   if (*hex == '~') hex++; /* TIS-B / non-ICAO address */
-  f.icao = (uint32_t)strtoul(hex, nullptr, 16);
-  copy_trim(f.callsign, o["flight"] | "", true);
-  copy_trim(f.reg, o["r"] | "", true);
-  copy_trim(f.type, o["t"] | "", true);
-  copy_trim(f.squawk, o["squawk"] | "", false);
+  f.icao = (uint32_t)strtoul(hex, nullptr, 16) & 0xFFFFFF;
+  copy_ident(f.callsign, o["flight"] | "");
+  copy_ident(f.reg, o["r"] | "");
+  copy_ident(f.type, o["t"] | "");
+  copy_ident(f.squawk, o["squawk"] | "");
   f.lat = la;
   f.lon = lo;
 
@@ -71,15 +86,14 @@ bool feed_parse_aircraft(JsonObjectConst o, Flight& f, uint32_t now_ms) {
   if (ab.is<const char*>() && strcmp(ab.as<const char*>(), "ground") == 0) {
     f.alt_ft = 0;
     f.flags |= FF_GROUND;
-  } else if (ab.is<float>() || ab.is<long>()) {
-    f.alt_ft = (int32_t)lroundf(ab.as<float>());
   } else {
-    JsonVariantConst ag = o["alt_geom"];
-    f.alt_ft = (ag.is<float>() || ag.is<long>()) ? (int32_t)lroundf(ag.as<float>()) : ALT_UNKNOWN;
+    /* -2,000 ft (below the Dead Sea) to 150,000 ft (above any balloon) */
+    float a = num_in(ab, -2000, 150000, num_in(o["alt_geom"], -2000, 150000, NAN));
+    f.alt_ft = isnan(a) ? ALT_UNKNOWN : (int32_t)lroundf(a);
   }
-  f.gs_kt = num_or(o["gs"], 0.0f);
-  f.track = num_or(o["track"], num_or(o["true_heading"], NAN));
-  f.vs_fpm = (int16_t)lroundf(num_or(o["baro_rate"], num_or(o["geom_rate"], 0.0f)));
+  f.gs_kt = num_in(o["gs"], 0, 4000, 0.0f);
+  f.track = num_in(o["track"], -360, 360, num_in(o["true_heading"], -360, 360, NAN));
+  f.vs_fpm = (int16_t)lroundf(num_in(o["baro_rate"], -30000, 30000, num_in(o["geom_rate"], -30000, 30000, 0.0f)));
   f.db_flags = (uint8_t)(o["dbFlags"] | 0);
 
   const char* cat = o["category"] | "";
@@ -113,13 +127,17 @@ time_t utc_from_civil(int y, int m, int d, int hh, int mm, int ss) {
 
 time_t parse_iso8601_utc(const char* s) {
   int y, mo, d, h = 0, mi = 0, se = 0;
-  if (!s || sscanf(s, "%d-%d-%dT%d:%d:%d", &y, &mo, &d, &h, &mi, &se) < 3) return 0;
+  /* at least "YYYY-MM-DD": the offset is looked for after those ten bytes */
+  if (!s || strnlen(s, 10) < 10 || sscanf(s, "%4d-%2d-%2dT%2d:%2d:%2d", &y, &mo, &d, &h, &mi, &se) < 3) return 0;
+  if (y < 1970 || y > 2100 || mo < 1 || mo > 12 || d < 1 || d > 31 || h < 0 || h > 24 || mi < 0 || mi > 59 ||
+      se < 0 || se > 60)
+    return 0;
   time_t t = utc_from_civil(y, mo, d, h, mi, se);
   /* Honour an explicit numeric offset (Tomorrow.io sends Z, others may not). */
   const char* tz = strpbrk(s + 10, "Z+-");
   if (tz && (*tz == '+' || *tz == '-')) {
     int oh = 0, om = 0;
-    if (sscanf(tz + 1, "%d:%d", &oh, &om) >= 1) {
+    if (sscanf(tz + 1, "%2d:%2d", &oh, &om) >= 1 && oh >= 0 && oh <= 14 && om >= 0 && om <= 59) {
       long off = oh * 3600L + om * 60L;
       t -= (*tz == '+') ? off : -off;
     }
@@ -134,12 +152,12 @@ time_t parse_iso8601_utc(const char* s) {
 bool weather_parse_openmeteo(const JsonDocument& doc, WeatherData& w) {
   JsonObjectConst cur = doc["current"];
   if (cur.isNull()) return false;
-  w.temp_c = num_or(cur["temperature_2m"], NAN);
-  w.feels_c = num_or(cur["apparent_temperature"], w.temp_c);
-  w.humidity = num_or(cur["relative_humidity_2m"], NAN);
-  w.wind_kmh = num_or(cur["wind_speed_10m"], NAN);
-  w.wind_dir = num_or(cur["wind_direction_10m"], NAN);
-  w.uv = num_or(cur["uv_index"], NAN);
+  w.temp_c = temp_in(cur["temperature_2m"], NAN);
+  w.feels_c = temp_in(cur["apparent_temperature"], w.temp_c);
+  w.humidity = num_in(cur["relative_humidity_2m"], 0, 100, NAN);
+  w.wind_kmh = num_in(cur["wind_speed_10m"], 0, 500, NAN);
+  w.wind_dir = num_in(cur["wind_direction_10m"], 0, 360, NAN);
+  w.uv = num_in(cur["uv_index"], 0, 30, NAN);
   w.is_day = (cur["is_day"] | 1) != 0;
   w.cond = wx_from_wmo(cur["weather_code"] | -1);
   w.updated = (time_t)(cur["time"] | (long)0);
@@ -154,7 +172,7 @@ bool weather_parse_openmeteo(const JsonDocument& doc, WeatherData& w) {
   w.hourly_n = 0;
   for (size_t i = 0; i < ht.size() && w.hourly_n < WX_HOURS; i++) {
     if (i == 0) w.hourly_start = (time_t)ht[0].as<long>();
-    w.hourly_c[w.hourly_n] = num_or(htemp[i], NAN);
+    w.hourly_c[w.hourly_n] = temp_in(htemp[i], NAN);
     w.hourly_cond[w.hourly_n] = wx_from_wmo(hcode[i] | -1);
     w.hourly_pop[w.hourly_n] = (int8_t)(hpop[i] | -1);
     w.hourly_n++;
@@ -166,8 +184,8 @@ bool weather_parse_openmeteo(const JsonDocument& doc, WeatherData& w) {
   w.daily_n = 0;
   for (size_t i = 0; i < dt.size() && w.daily_n < WX_DAYS; i++) {
     w.daily_date[w.daily_n] = (time_t)dt[i].as<long>();
-    w.daily_hi[w.daily_n] = num_or(dmax[i], NAN);
-    w.daily_lo[w.daily_n] = num_or(dmin[i], NAN);
+    w.daily_hi[w.daily_n] = temp_in(dmax[i], NAN);
+    w.daily_lo[w.daily_n] = temp_in(dmin[i], NAN);
     w.daily_cond[w.daily_n] = wx_from_wmo(dcode[i] | -1);
     w.daily_n++;
   }
@@ -185,13 +203,13 @@ bool weather_parse_openmeteo(const JsonDocument& doc, WeatherData& w) {
 bool weather_parse_tomorrow_realtime(const JsonDocument& doc, WeatherData& w) {
   JsonObjectConst v = doc["data"]["values"];
   if (v.isNull()) return false;
-  w.temp_c = num_or(v["temperature"], NAN);
-  w.feels_c = num_or(v["temperatureApparent"], w.temp_c);
-  w.humidity = num_or(v["humidity"], NAN);
-  float ws = num_or(v["windSpeed"], NAN);
+  w.temp_c = temp_in(v["temperature"], NAN);
+  w.feels_c = temp_in(v["temperatureApparent"], w.temp_c);
+  w.humidity = num_in(v["humidity"], 0, 100, NAN);
+  float ws = num_in(v["windSpeed"], 0, 140, NAN);
   w.wind_kmh = isnan(ws) ? NAN : ws * 3.6f;
-  w.wind_dir = num_or(v["windDirection"], NAN);
-  w.uv = num_or(v["uvIndex"], NAN);
+  w.wind_dir = num_in(v["windDirection"], 0, 360, NAN);
+  w.uv = num_in(v["uvIndex"], 0, 30, NAN);
   w.cond = wx_from_tomorrow(v["weatherCode"] | 0);
   w.updated = parse_iso8601_utc(doc["data"]["time"] | "");
   w.valid = !isnan(w.temp_c);
@@ -223,7 +241,7 @@ bool weather_parse_tomorrow_forecast(const JsonDocument& doc, WeatherData& w, ti
     if (w.hourly_n >= WX_HOURS) break;
     if (!w.hourly_n) w.hourly_start = t;
     JsonObjectConst v = h["values"];
-    w.hourly_c[w.hourly_n] = num_or(v["temperature"], NAN);
+    w.hourly_c[w.hourly_n] = temp_in(v["temperature"], NAN);
     w.hourly_cond[w.hourly_n] = wx_from_tomorrow(v["weatherCode"] | 0);
     w.hourly_pop[w.hourly_n] = (int8_t)(v["precipitationProbability"] | -1);
     w.hourly_n++;
@@ -233,8 +251,8 @@ bool weather_parse_tomorrow_forecast(const JsonDocument& doc, WeatherData& w, ti
     if (w.daily_n >= WX_DAYS) break;
     JsonObjectConst v = d["values"];
     w.daily_date[w.daily_n] = parse_iso8601_utc(d["time"] | "");
-    w.daily_hi[w.daily_n] = num_or(v["temperatureMax"], NAN);
-    w.daily_lo[w.daily_n] = num_or(v["temperatureMin"], NAN);
+    w.daily_hi[w.daily_n] = temp_in(v["temperatureMax"], NAN);
+    w.daily_lo[w.daily_n] = temp_in(v["temperatureMin"], NAN);
     w.daily_cond[w.daily_n] = wx_from_tomorrow(v["weatherCodeMax"] | 0);
     if (!w.daily_n) w.precip_pct = (int8_t)(v["precipitationProbabilityMax"] | -1);
     w.daily_n++;
@@ -269,10 +287,10 @@ bool route_parse_adsbdb(const JsonDocument& doc, RouteInfo& r) {
   cpy(r.dest_icao, d["icao_code"] | "");
   cpy(r.orig_city, o["municipality"] | (o["name"] | ""));
   cpy(r.dest_city, d["municipality"] | (d["name"] | ""));
-  r.olat = num_or(o["latitude"], NAN);
-  r.olon = num_or(o["longitude"], NAN);
-  r.dlat = num_or(d["latitude"], NAN);
-  r.dlon = num_or(d["longitude"], NAN);
+  r.olat = num_in(o["latitude"], -90, 90, NAN);
+  r.olon = num_in(o["longitude"], -180, 180, NAN);
+  r.dlat = num_in(d["latitude"], -90, 90, NAN);
+  r.dlon = num_in(d["longitude"], -180, 180, NAN);
   r.state = ROUTE_OK;
   return true;
 }
@@ -313,11 +331,12 @@ bool quake_parse_usgs(const JsonDocument& doc, QuakeData& q, double lat, double 
   JsonObjectConst e = feats[0];
   JsonObjectConst p = e["properties"];
   JsonArrayConst c = e["geometry"]["coordinates"];
-  q.mag = num_or(p["mag"], NAN);
+  q.mag = num_in(p["mag"], -2, 10, NAN);
   cpy(q.place, p["place"] | "");
-  q.when = (time_t)(p["time"].as<double>() / 1000.0);
-  q.lon = c[0] | 0.0f;
-  q.lat = c[1] | 0.0f;
+  double when_ms = p["time"].as<double>(); /* ms since 1970; anything else reads as "unknown" */
+  q.when = (when_ms > 0 && when_ms < 4.1e12) ? (time_t)(when_ms / 1000.0) : 0;
+  q.lon = num_in(c[0], -180, 180, 0.0f);
+  q.lat = num_in(c[1], -90, 90, 0.0f);
   q.dist_km = (float)(geo_dist_nm(lat, lon, q.lat, q.lon) * KM_PER_NM);
   const char* id = e["id"] | "";
   q.id_hash = fs_crc32(id, strlen(id));

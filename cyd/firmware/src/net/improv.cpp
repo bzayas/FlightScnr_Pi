@@ -92,11 +92,13 @@ static void handle_rpc(const uint8_t* d, uint8_t len) {
   const uint8_t* p = d + 2;
   switch (cmd) {
     case IMP_CMD_WIFI: {
+      if (len < 4) return send_error(IMP_ERR_INVALID_RPC); /* command, length, two string lengths */
       uint8_t sl = p[0];
       if (2u + 1u + sl + 1u > len) return send_error(IMP_ERR_INVALID_RPC);
+      uint8_t pl = p[1 + sl];
+      if (2u + 1u + sl + 1u + pl > len) return send_error(IMP_ERR_INVALID_RPC); /* the password must be in the packet too */
       char ssid[33] = {0}, pass[65] = {0};
       memcpy(ssid, p + 1, sl < 32 ? sl : 32);
-      uint8_t pl = p[1 + sl];
       memcpy(pass, p + 2 + sl, pl < 64 ? pl : 64);
       send_state(IMP_STATE_PROVISIONING);
       net_set_wifi(ssid, pass);

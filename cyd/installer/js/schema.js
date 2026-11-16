@@ -290,6 +290,7 @@ export function defaults() {
       track: '',
       watch: [],
     },
+    portal: { lock: false },
   };
 }
 

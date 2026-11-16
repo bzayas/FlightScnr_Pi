@@ -187,6 +187,32 @@ static const char* const PCOLOR_NAMES[] = {"theme", "altitude"};
 /* BoardId order (core/board.h) */
 static const char* const BOARD_NAMES[] = {"auto", "cyd28", "cyd28usbc", "e32r40t"};
 
+/* Watch-list and tracked identities: letters and digits only, upper case.
+ * They go into request URLs and are compared with what the feeds send. */
+template <size_t N>
+static void normalise_ident(char (&dst)[N], const char* src) {
+  size_t j = 0;
+  for (const char* p = src; p && *p && j < N - 1; p++)
+    if (isalnum((unsigned char)*p)) dst[j++] = (char)toupper((unsigned char)*p);
+  memset(dst + j, 0, N - j);
+}
+
+/* A DNS label: letters, digits and '-', not at either end. It names the
+ * display on the network and decides which Host headers the portal answers. */
+static void normalise_hostname(char* h, size_t n) {
+  size_t j = 0;
+  for (size_t i = 0; h[i] && j < n - 1; i++) {
+    unsigned char ch = (unsigned char)h[i];
+    if (isalnum(ch))
+      h[j++] = (char)tolower(ch);
+    else if ((ch == '-' || ch == '_' || ch == ' ') && j > 0 && h[j - 1] != '-')
+      h[j++] = '-';
+  }
+  while (j > 0 && h[j - 1] == '-') j--;
+  h[j] = 0;
+  if (!j) snprintf(h, n, "flightscnr");
+}
+
 bool cfg_apply_json(AppConfig& c, const char* json, size_t len, bool keep_blank) {
   JsonDocument doc;
   if (deserializeJson(doc, json, len)) return false;
@@ -198,11 +224,20 @@ bool cfg_apply_json(AppConfig& c, const char* json, size_t len, bool keep_blank)
     get_str(w["ssid"], c.wifi_ssid);
     get_str(w["pass"], c.wifi_pass, true, keep_blank);
     get_str(w["host"], c.hostname);
+    normalise_hostname(c.hostname, sizeof(c.hostname));
   }
   JsonObjectConst l = root["loc"];
   if (!l.isNull()) {
-    if (l["lat"].is<double>()) c.lat = l["lat"].as<double>();
-    if (l["lon"].is<double>()) c.lon = l["lon"].as<double>();
+    /* only a real place on Earth; each on its own, since the portal sends
+     * just the field that changed */
+    if (l["lat"].is<double>()) {
+      double la = l["lat"].as<double>();
+      if (fabs(la) <= 90) c.lat = la;
+    }
+    if (l["lon"].is<double>()) {
+      double lo = l["lon"].as<double>();
+      if (fabs(lo) <= 180) c.lon = lo;
+    }
     get_str(l["name"], c.loc_name);
     get_str(l["tz"], c.tz_name);
     get_str(l["posix"], c.tz_posix);
@@ -294,7 +329,10 @@ bool cfg_apply_json(AppConfig& c, const char* json, size_t len, bool keep_blank)
     get_bool(al["tracked"], c.al_tracked);
     get_bool(al["watch_on"], c.al_watch);
     get_bool(al["quake"], c.al_quake);
-    if (al["quake_min"].is<double>()) c.quake_min_mag = (float)al["quake_min"].as<double>();
+    if (al["quake_min"].is<double>()) {
+      double m = al["quake_min"].as<double>();
+      c.quake_min_mag = (float)(m < 0 ? 0 : (m > 10 ? 10 : m));
+    }
     get_int(al["quake_km"], c.quake_km, 10, 2000);
     get_str(al["track"], c.track);
     JsonArrayConst wl = al["watch"];
@@ -305,19 +343,17 @@ bool cfg_apply_json(AppConfig& c, const char* json, size_t len, bool keep_blank)
         if (n >= CFG_MAX_WATCH) break;
         const char* t = s.as<const char*>();
         if (!t || !*t) continue;
-        size_t j = 0;
-        for (const char* p = t; *p && j < sizeof(c.watch[0]) - 1; p++)
-          if (*p != ' ' && *p != '-') c.watch[n][j++] = (char)toupper((unsigned char)*p);
-        if (j) n++;
+        normalise_ident(c.watch[n], t);
+        if (c.watch[n][0]) n++;
       }
     }
   }
+  JsonObjectConst po = root["portal"];
+  if (!po.isNull()) get_bool(po["lock"], c.portal_lock);
   /* Normalise the tracked identity the same way as the watch list. */
   {
-    size_t j = 0;
-    char tmp[sizeof(c.track)] = {0};
-    for (const char* p = c.track; *p && j < sizeof(tmp) - 1; p++)
-      if (*p != ' ' && *p != '-') tmp[j++] = (char)toupper((unsigned char)*p);
+    char tmp[sizeof(c.track)];
+    normalise_ident(tmp, c.track);
     memcpy(c.track, tmp, sizeof(tmp));
   }
   return true;
@@ -406,6 +442,8 @@ size_t cfg_to_json(const AppConfig& c, char* out, size_t cap, bool secrets) {
   JsonArray wl = al["watch"].to<JsonArray>();
   for (int i = 0; i < CFG_MAX_WATCH; i++)
     if (c.watch[i][0]) wl.add(c.watch[i]);
+
+  doc["portal"]["lock"] = c.portal_lock;
 
   return serializeJson(doc, out, cap);
 }

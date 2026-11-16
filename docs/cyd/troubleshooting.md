@@ -36,7 +36,10 @@ Any serial monitor works too, at **115200 baud** (Arduino IDE, PlatformIO's `pio
 | `[mem] <stage> heap …` | Free memory after each start-up stage. |
 | `[mem] heap … (lowest …), largest block …` | A memory report every minute for the first five minutes, then every ten. *Lowest* is the least free memory since boot; on a 2.8″ board it normally stays above about 30 KB. The end of the line counts secure connections: *full* handshakes, *resumed* sessions (cheap reconnections) and *mbedtls* fallbacks (should stay at 0). |
 | `[net] Wi-Fi connected: <address> rssi <n>` | Joined the network. The address is the [portal](portal.md)'s. RSSI is the signal strength: −50 is excellent, −70 fair, below −80 poor. |
-| `[net] setup AP "FlightScnr-XXXX" …` | The setup hotspot opened, with its password and address. |
+| `[boot] last reset: …; restart N since power-on` | The display has restarted N times without being unplugged: by itself (a crash or a watchdog), or from Settings or the portal. |
+| `[net] setup AP "FlightScnr-XXXX" at …` | The setup hotspot opened. Its password is on the display's screen, not in the log. |
+| `[net] no flight data for 15 minutes: joining Wi-Fi again` | The display was connected but nothing was getting through, so it reconnected. Occasional lines are harmless; many mean the network or the internet connection is unreliable. |
+| `[net] the portal couldn't start (port 80)` | The portal isn't available. Please report it. |
 | `[net] last reset was a brownout: …` | After a brownout, Wi-Fi transmit power is lowered to ease the load on the supply. |
 | `[feed] <source>: <code> <reason>` | A flight feed failed. Printed once per new problem, not every refresh. |
 | `[feed] <source>: rate limited, resting <n>s` | A feed asked FlightScnr to slow down; the next feed is used meanwhile. |
@@ -45,6 +48,7 @@ Any serial monitor works too, at **115200 baud** (Arduino IDE, PlatformIO's `pio
 | `[wx] Open-Meteo: 18.5 C` | Weather updated, with the source and the temperature in °C. Current conditions refresh every 15 minutes, the forecast every hour. |
 | `[wx] no weather: …` | Weather failed, and why. It retries in 2 minutes. |
 | `[diag] core 0 has been busy for … ms` | The network side was busy for a long time without a break. Useful in bug reports; occasional lines are harmless. |
+| `[diag] the network task has been stuck in "…" for … s - restarting` | The network side stopped for five minutes and the display restarted itself to recover. Please report it with the log. |
 | `[lvgl] assertion failed - restarting` | The screen library hit an internal error, usually from running out of memory. Please report it with the log. |
 
 ## The screen stays dark
@@ -74,13 +78,16 @@ Any serial monitor works too, at **115200 baud** (Arduino IDE, PlatformIO's `pio
 
 - **Taps land in the wrong place:** **Settings → Calibrate touch**. If you can't reach Settings, hold **BOOT** while the board starts, or start calibration from the portal's **System** page.
 - **Taps are ignored:** press firmly. The screen is resistive: it needs pressure, and a stylus or fingernail works better than a fingertip.
-- **Swiping between pages is hard:** check **Settings → About** shows 2026.10.7.8 or later, which reads fingertips much more reliably. Then swipe sideways about a tenth of the screen width, or flick. Press with the pad of your finger and keep it pressed until the end of the swipe. A swipe that starts out mostly sideways stays a page swipe, even if it drifts up or down.
+- **Swiping between pages is hard:** check **Settings → About** shows 2026.11.16.1 or later, which counts a swipe from where the finger lands and decides its direction more reliably. Then swipe sideways a centimetre or so, or flick. Press with the pad of your finger and keep it pressed until the end of the swipe. A swipe that starts out mostly sideways stays a page swipe, even if it drifts up or down.
+- **The sweep or the animations stutter after days of running:** update to 2026.11.16.1 or later. Earlier versions lost smoothness the longer they ran (noticeably after about a week) until they were restarted.
 - **Customize is hard to use:** update to 2026.10.7.9 or later. Its controls no longer cover any widget, the buttons are larger, and you can swipe sideways to change the layout.
 
 ## Random restarts
 
 Read the [device log](#the-device-log) and look at the `[boot] last reset:` line.
 
+- **CRASH (task watchdog):** the screen stopped updating for 15 seconds and the display restarted itself. Once is a recovery working as intended; if it repeats, please [report it](#reporting-a-problem) with the log.
+- **software restart**, when you didn't ask for one: the network side stopped for five minutes (the log says so just before) and the display restarted to recover.
 - **BROWNOUT:** the power supply dips when Wi-Fi transmits. Use a better cable, a port on the computer itself, a powered hub or a 5 V 1 A charger. FlightScnr lowers its Wi-Fi power after a brownout to help.
 - **CRASH (…):** a bug. Please [report it](#reporting-a-problem) with the whole log, including the lines just before the restart.
 
@@ -111,7 +118,8 @@ adsbdb.com has no route for that callsign. This is common for private, military,
 ## Wi-Fi
 
 - The ESP32 only joins **2.4 GHz** networks. On a router with one name for both bands, it picks 2.4 GHz by itself; if it doesn't, give the 2.4 GHz band its own name.
-- If it can't join for 45 seconds, it opens the [setup hotspot](first-start.md#3-getting-on-wi-fi) so you can fix the details. It keeps trying the saved network meanwhile.
+- If it can't join, it opens the [setup hotspot](first-start.md#3-getting-on-wi-fi) so you can fix the details: after 45 seconds when it has just started, after 5 minutes if it was online before. It keeps trying the saved network meanwhile. **Settings → Start setup hotspot** opens it at once.
+- The hotspot's password changed after updating to 2026.11.16.1: it is now random. The new one is on the setup card and in its QR code.
 - Networks with a sign-in page (hotels, some offices) don't work.
 
 ## The portal won't open
@@ -119,6 +127,8 @@ adsbdb.com has no route for that callsign. This is common for private, military,
 - Your phone or computer must be on the **same network** as the display.
 - The address can change when the router restarts. Check it under **Settings → Portal**.
 - The page is slow to load right after the display starts. Wait a few seconds and reload.
+- *Open the display by its address*: the portal only answers to its own address and device name. Use the address shown under **Settings → Portal**.
+- *The portal is locked*: turn off **Settings → Lock portal** on the display. See [Locking the portal](portal.md#locking-the-portal).
 
 ## Starting over
 

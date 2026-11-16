@@ -91,25 +91,28 @@ bool model_next_route_request(char* out) {
 
 void model_store_route(const RouteInfo& r) {
   ModelGuard g;
+  /* its own entry, else a free one, else the one stored longest ago (by
+   * age, so the order survives the millisecond counter's wrap) */
+  const uint32_t now = plat_millis();
   RouteInfo* slot = nullptr;
-  uint32_t oldest = 0xFFFFFFFF;
+  uint32_t age = 0;
+  bool free_found = false;
   for (auto& e : s_routes) {
     if (e.state != ROUTE_NONE && strcmp(e.callsign, r.callsign) == 0) {
       slot = &e;
       break;
     }
+    if (free_found) continue;
     if (e.state == ROUTE_NONE) {
       slot = &e;
-      oldest = 0;
-    } else if (oldest && e.ts_ms < oldest) {
-      oldest = e.ts_ms;
+      free_found = true;
+    } else if (!slot || now - e.ts_ms > age) {
+      age = now - e.ts_ms;
       slot = &e;
     }
   }
-  if (slot) {
-    *slot = r;
-    slot->ts_ms = plat_millis();
-  }
+  *slot = r;
+  slot->ts_ms = now;
 }
 
 uint8_t model_aircraft(uint32_t icao, AircraftInfo* out) {
@@ -138,16 +141,26 @@ bool model_next_aircraft_request(uint32_t* out) {
 
 void model_store_aircraft(const AircraftInfo& a) {
   ModelGuard g;
-  AircraftInfo* slot = &s_aircraft[0];
+  const uint32_t now = plat_millis();
+  AircraftInfo* slot = nullptr;
+  uint32_t age = 0;
+  bool free_found = false;
   for (auto& e : s_aircraft) {
     if (e.state != ROUTE_NONE && e.icao == a.icao) {
       slot = &e;
       break;
     }
-    if (e.state == ROUTE_NONE || e.ts_ms < slot->ts_ms) slot = &e;
+    if (free_found) continue;
+    if (e.state == ROUTE_NONE) {
+      slot = &e;
+      free_found = true;
+    } else if (!slot || now - e.ts_ms > age) {
+      age = now - e.ts_ms;
+      slot = &e;
+    }
   }
   *slot = a;
-  slot->ts_ms = plat_millis();
+  slot->ts_ms = now;
 }
 
 void model_push_notice(const Notice& n) {

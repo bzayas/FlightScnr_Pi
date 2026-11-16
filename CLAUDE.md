@@ -81,6 +81,7 @@ pio run -e cyd-e32r40t                     # firmware (one image for every board
 make -C sim -j && sim/build/fs_sim [--small] [--landscape] --out shots   # simulator; exits non-zero if swipe/settings checks fail
 make -C sim check                          # installer schema (cyd/installer/js/schema.js) matches src/core/config.cpp
 make -C test/fetch check                   # HTTP/HTTPS client tests
+make -C test/portal check                  # portal server + request policy: unit tests and attack.py (ASan/UBSan)
 python3 tools/build_portal.py [--check]    # re-embed cyd/installer as the device portal after editing it
 python3 tools/make_gallery.py shots        # regenerate installer + guide screenshots from all four sim sizes
 sim/build/fs_sim --gallery --out gallery   # every widget at every slot size + every glyph, for design review
@@ -89,5 +90,7 @@ sim/build/fs_sim --gallery --out gallery   # every widget at every slot size + e
 - ESP32 without PSRAM: memory is the main constraint. HTTPS is BearSSL in a static block (`src/net/fetch.cpp`); the net task runs on core 0 at priority 1; Traffic and Settings are drawn lists built on demand.
 - Settings JSON lives in the `fscfg` partition (`0x3D0000`). Never move partition offsets, and keep stored JSON keys stable (layout keys `infograph`/`modular`/`focus`/`full` are shown as Instruments/Panels/Focus/Full screen).
 - The boot safety disclaimer rule applies to the CYD too (`src/ui/screens/boot.cpp`).
+- The device runs for months: compare `millis()` times by signed difference, and never drive animation from `float(millis())` (see *Clocks* in `docs/cyd/development.md`). The simulator's `--uptime-ms` runs check both.
+- The portal (`src/net/portal.cpp`) has no login; `portal_policy.cpp` (Host/Origin/JSON rules) and `httpd.cpp` (size and time limits) are what protect it. Keep `make -C test/portal check` passing, and keep secrets out of `/api/*` responses and the serial log. `docs/cyd/security.md` states the guarantees.
 - Version in `cyd/VERSION`, tags `cyd-v<version>`. CYD CI (`.github/workflows/cyd.yml`) must never create GitHub Releases, and CYD builds must never use `scripts/release.sh`.
 - Update `docs/cyd/` and `cyd/CHANGELOG.md` with user-visible changes.

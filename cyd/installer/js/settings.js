@@ -38,7 +38,6 @@ export function h(tag, attrs, ...kids) {
     if (k.startsWith('on') && typeof v === 'function') el.addEventListener(k.slice(2), v);
     else if (k === 'class') el.setAttribute('class', v);
     else if (k === 'style' && typeof v === 'object') Object.assign(el.style, v);
-    else if (k === 'html') el.innerHTML = v;
     else if (k in el && !ns && typeof v !== 'string') el[k] = v;
     else el.setAttribute(k, v === true ? '' : v);
   }
@@ -303,8 +302,13 @@ export class SettingsUI {
       this.group(null, [
         ssidRow,
         this.text('Password', 'wifi.pass', { type: 'password', secretFlag: 'wifi.has_pass', placeholder: 'Leave blank for open networks', max: 63 }),
-        this.text('Device name', 'wifi.host', { placeholder: 'flightscnr', help: 'The name your router shows for the display.', max: 31 }),
-      ], 'If the device can’t join within 45 seconds it opens its own “FlightScnr-XXXX” hotspot. The hotspot password is shown on screen with a QR code, so you can fix settings from your phone.'),
+        this.text('Device name', 'wifi.host', { placeholder: 'flightscnr', help: 'The name your router shows for the display. Letters, digits and hyphens.', max: 31 }),
+      ], 'If the display can’t join your network it opens its own “FlightScnr-XXXX” hotspot: after 45 seconds when it has just started, after 5 minutes if it was online before. The hotspot’s password is shown on the screen with a QR code, so you can fix settings from your phone.'),
+      this.group('Portal', [
+        this.toggle('Lock the portal', 'portal.lock', this.portal
+          ? 'Once saved, this page shows status only. To unlock it, turn off Lock portal under Settings on the display itself.'
+          : 'The display’s web page then shows status only: settings can be changed on the display, or here over USB.'),
+      ], 'The portal is the page the display serves on your network (its address is under Settings → Portal). Anyone on your Wi-Fi can open it; lock it if you share the network.'),
     ];
   }
 

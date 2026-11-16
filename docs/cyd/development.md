@@ -35,7 +35,8 @@ cyd/
       main.cpp             start-up, the UI loop on core 1
       core/                settings (config.cpp), commands, layout ids, memory guard
       data/                the shared model, feed parsers, aircraft database, alerts, sun and moon, units
-      net/                 Wi-Fi and the fetch scheduler (net.cpp), HTTP(S) (fetch.cpp, http.cpp), portal, Improv
+      net/                 Wi-Fi and the fetch scheduler (net.cpp), HTTP(S) client (fetch.cpp, http.cpp),
+                           the portal (portal.cpp) on its server (httpd.cpp) and request policy (portal_policy.cpp), Improv
       hal/                 display and touch (LovyanGFX), board detection, settings storage, diagnostics
       ui/                  the scope (face.cpp), radar, widgets (complications.cpp), layouts, themes, pages
       ui/screens/          boot (safety notice, calibration), flight sheet, Sky, Traffic, Settings
@@ -43,6 +44,7 @@ cyd/
       diag/                the display test firmware
     sim/                   desktop simulator and the settings-format test
     test/fetch/            HTTP/HTTPS client tests
+    test/portal/           the portal's server and request policy: unit tests, an attack script, a browser test
     tools/                 asset generators, packaging, gallery
   installer/
     index.html, js/, css/  the web installer
@@ -87,11 +89,22 @@ sim/build/fs_sim --small --landscape --out shots # 2.8" landscape
 Besides the screenshots, it:
 
 - reports how many pixels each radar frame sends over SPI;
+- checks that the sweep moves in small, even steps (it once degraded with uptime: see *Clocks* below);
 - checks that short swipes and flicks turn the page, with a stylus and with a simulated fingertip (a first contact that lands off target, dropped samples and sideways jitter);
+- runs a stress test of 320 finger gestures: swipes of random length, speed and drift must all turn the page, taps must not, and vertical drags must scroll Sky. `FS_STRESS_SEED=n` tries another sequence and `FS_STRESS_VERBOSE=1` describes each failure;
 - checks that Settings' switches, segmented controls and sliders respond to taps;
 - checks Customize at every layout: the panel is on screen and covers no outline, and its arrows, swatches, swipes, slots and Done answer a fingertip.
 
 It exits with an error if a check fails. CI runs all four sizes.
+
+The simulator's loop comes round every 4 ms and uses the device's input settings and draw-band height, so the touch panel is read every 20 ms and the screen is drawn in the same bands as on the board. Two options test long uptimes:
+
+```bash
+sim/build/fs_sim --small --landscape --uptime-ms 3456000000 --out shots   # start 40 days in
+sim/build/fs_sim --uptime-ms 4294960000 --out shots                       # the 32-bit millisecond counter wraps 7 s into the run
+```
+
+CI runs both. `FS_CHECK_ORDER` (letters from `mwset`: motion, swipes, settings, editor, touch stress) picks which checks run and in what order.
 
 `--bench` times what the UI core does in common moments (the scope with the sweep running, full redraws of each layout and page, a page swipe, scrolling Sky, a sheet opening, Customize) with the device's draw buffer, and prints frames, pixels and CPU time per frame. Host time isn't ESP32 time, but the ratios carry over; run it under `valgrind --tool=callgrind` to see where the time goes. On the device, the `[ui]` log line reports real frame times.
 
@@ -119,7 +132,11 @@ python3 tools/make_gallery.py shots       # after running the four fs_sim comman
 make -C sim check          # the installer's settings format matches the firmware's
 make -C test/fetch check   # the HTTP/HTTPS client, against a local server that drips, truncates and stalls
 make -C test/fetch online  # also connects to every API host and checks its real certificate chain
+make -C test/portal check  # the portal's request policy, then attack.py against its server (ASan + UBSan)
+make -C test/portal browser  # the real portal page in headless Chromium (needs Playwright; not in CI)
 ```
+
+`test/portal` builds the portal's server and policy for Linux, with the real bundled page, its real Content-Security-Policy and the firmware's settings code behind `/api/config`. `attack.py` sends what the server must put up with: requests that are too big, too slow, malformed, cross-site, and 1,500 random blobs. `browser_test.mjs` checks that the page runs under its policy, saves settings, locks, and can't be reached by a page from another origin.
 
 `online` needs internet. Behind a proxy that supports CONNECT, set `FETCH_PROXY=host:port`.
 
@@ -180,12 +197,28 @@ The XPT2046 is resistive. A stylus gives clean samples; a fingertip presses ligh
 
 - **Settle:** the first sample of a touch is dropped.
 - **Smooth:** a light IIR filter steadies jitter.
-- **Axis lock:** the pointer holds still until it has moved 8 px, then commits to one axis for the rest of the touch, leaning horizontal. A wobbly page swipe can't turn into a list scroll, and taps and long presses stay exact.
+- **Axis lock:** the pointer holds still until it has moved 14 px, then commits to one axis for the rest of the touch, leaning horizontal. A wobbly page swipe can't turn into a list scroll, and taps and long presses stay exact. (At 8 px, ±3 px of finger jitter picked the wrong axis about once in a hundred drags; LVGL doesn't scroll until 12 px anyway.)
 - **Bridge:** up to five missed samples (100 ms) don't end a drag.
 
 The touch controller's pen-down line (IRQ) also blinks off under a light finger, and LovyanGFX skips samples while it's off. `Touch_CYD` in `hal/lgfx_board.h` uses the line only to detect the start of a touch; during a touch, the pressure reading alone decides. The touch SPI clock is 1 MHz, which gives the ADC time to settle on a light, high-resistance contact.
 
-A page turns once the drag has travelled a tenth of the screen width (at least 20 px), or with a flick (`pager_feedback` in `ui/ui.cpp`).
+A page turns once the finger has travelled a twelfth of the screen width (at least 20 px) from where it came down, or a sixteenth for a flick (`pager_feedback` in `ui/ui.cpp`). The travel comes from the touch filter (`touch_last_gesture()`), not from LVGL's `scroll_sum`, which only starts counting 12 px into a drag.
+
+### Clocks
+
+`millis()` is a 32-bit counter that wraps after 49.7 days, and this display runs for months.
+
+- **Compare times by signed difference**: `(int32_t)(now - deadline) >= 0`, never `now >= deadline`.
+- **Never animate from `float(millis())`.** A float has 24 bits: after six days of uptime it steps by 64 ms, after 25 days by 256 ms. The radar's sweep, pulses and rotors run on an integer animation clock instead (`s_anim_ms` in `ui/radar.cpp`), which wraps at a multiple of every period it is used with.
+- Uptime for people comes from `plat_uptime_s()`, which does not wrap.
+
+### The portal
+
+`net/httpd.cpp` is a small HTTP server on BSD sockets, portable so that it is tested on Linux. One request at a time: at most 2 KB of headers and 8 KB of body in one buffer that exists only while the request is served, 3 s from the first byte to the last, `Connection: close` on every reply. Connections that haven't sent anything wait in a select() without holding the server up. Arduino's WebServer, which it replaced, read every line and body into unbounded Strings.
+
+`net/portal_policy.cpp` decides which requests are answered (no I/O, unit-tested): the Host header must be the display's address or its hostname in a local zone, a write must be `application/json`, and an Origin header, when present, must be the display itself. `net/portal.cpp` applies it, adds the response headers, and handles **Lock portal** (`portal.lock` in the settings).
+
+`tools/build_portal.py` writes the page's Content-Security-Policy into `assets/portal_assets.cpp`, with a SHA-256 for each inline script, and refuses to build if the page fetches from a host that isn't in its `CONNECT_HOSTS`.
 
 ### Customize
 
@@ -204,7 +237,9 @@ Settings are JSON in the `fscfg` flash partition (`0x3D0000`), in two 8 KB slots
 ### Memory safety nets
 
 - A small emergency reserve backs LVGL: if an allocation fails, the reserve is released so the screen keeps working, and it's rebuilt once memory recovers.
-- The task watchdog allows 15 s. If core 0 is busy for 2.5 s without a break, the log says what the network task was doing (`[diag]` lines).
+- The task watchdog allows 15 s, and covers the idle task on core 0 and the UI loop on core 1 (`enableLoopWDT()`): a screen that stops coming round restarts the board. If core 0 is busy for 2.5 s without a break, the log says what the network task was doing (`[diag]` lines).
+- The network task reports in every time round its loop (`diag_net_beat()`); if it stops for five minutes the UI restarts the board. If the display is connected but no flight data has arrived for 15 minutes, it rejoins Wi-Fi (at most every half hour).
+- Restarts since power-on are counted in RTC memory and shown with the reset reason in About and on the portal's Status page.
 - The log reports memory at each start-up stage, then regularly (`[mem]` lines).
 
 ## Changing things

@@ -27,7 +27,16 @@
  * 4. Bridge: a few missed samples don't end the touch: two for a tap, five
  *    (100 ms at 20 ms reads) once dragging, where a finger drops most.
  */
+static const TouchFilter* s_last; /* one touch panel: the filter last stepped */
+
+void touch_last_gesture(int32_t* dx, int32_t* dy, int32_t* peak) {
+  *dx = s_last ? s_last->out_x - s_last->down_x : 0;
+  *dy = s_last ? s_last->out_y - s_last->down_y : 0;
+  *peak = s_last ? s_last->peak : 0;
+}
+
 bool touch_filter_step(TouchFilter& t, bool pressed, float sx, float sy, int32_t* x, int32_t* y) {
+  s_last = &t;
   if (pressed) {
     if (!t.active) {
       if (!t.settling) { /* first contact: wait for a steadier sample */
@@ -42,10 +51,11 @@ bool touch_filter_step(TouchFilter& t, bool pressed, float sx, float sy, int32_t
       t.settling = false;
       t.active = true;
       t.lock = TOUCH_FREE;
+      t.peak = 0;
       t.fx = sx;
       t.fy = sy;
-      t.down_x = t.out_x = (int32_t)lroundf(sx);
-      t.down_y = t.out_y = (int32_t)lroundf(sy);
+      t.down_x = t.out_x = t.last_x = (int32_t)lroundf(sx);
+      t.down_y = t.out_y = t.last_y = (int32_t)lroundf(sy);
     } else {
       t.fx += (sx - t.fx) * 0.6f;
       t.fy += (sy - t.fy) * 0.6f;
@@ -55,6 +65,12 @@ bool touch_filter_step(TouchFilter& t, bool pressed, float sx, float sy, int32_t
     int32_t dx = px - t.down_x, dy = py - t.down_y;
     if (t.lock == TOUCH_FREE && (abs(dx) >= TOUCH_LOCK_PX || abs(dy) >= TOUCH_LOCK_PX))
       t.lock = abs(dx) * 4 >= abs(dy) * 3 ? TOUCH_HORIZONTAL : TOUCH_VERTICAL;
+    if (t.lock != TOUCH_FREE) { /* a missed read in between makes the step look faster: that's fine */
+      int32_t step = t.lock == TOUCH_HORIZONTAL ? abs(px - t.last_x) : abs(py - t.last_y);
+      if (step > t.peak) t.peak = (uint16_t)(step > 0xFFFF ? 0xFFFF : step);
+    }
+    t.last_x = px;
+    t.last_y = py;
     t.out_x = t.lock == TOUCH_VERTICAL || t.lock == TOUCH_FREE ? t.down_x : px;
     t.out_y = t.lock == TOUCH_HORIZONTAL || t.lock == TOUCH_FREE ? t.down_y : py;
     *x = t.out_x;

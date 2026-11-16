@@ -21,6 +21,7 @@
 #include "core/mem_guard.h"
 #include "core/config.h"
 #include "core/platform.h"
+#include "core/touch_filter.h"
 #include "data/alerts.h"
 #include "data/model.h"
 #include "face.h"
@@ -129,16 +130,27 @@ static void tv_scroll_begin(lv_event_t*) {
  * predicted from the release speed passes the middle of the screen. A
  * resistive panel reports almost no speed as the finger lifts, so it took
  * a nearly full-width swipe. Here, at release (just before LVGL decides),
- * a deliberate drag of an eighth of the width carries on to the next page,
+ * a deliberate drag of a twelfth of the width carries on to the next page,
  * like a flick does on a phone. */
+static const int FLICK_PX_PER_READ = 8; /* 400 px/s: about 7 cm/s on the 2.8" screen */
+
 static void pager_feedback(lv_indev_drv_t*, uint8_t code) {
   if (code != LV_EVENT_RELEASED || !s_tv) return;
   lv_indev_t* indev = lv_indev_get_act();
   if (!indev) return;
   auto& p = indev->proc.types.pointer;
   if (p.scroll_obj != s_tv || p.scroll_dir != LV_DIR_HOR) return;
-  lv_coord_t moved = p.scroll_sum.x; /* finger travel since the drag began; > 0 = rightwards */
-  lv_coord_t need = LV_MAX(20, s_w / 10); /* the touch filter holds the first few px for the axis lock */
+  /* The whole travel since the finger came down (> 0 = rightwards), not
+   * LVGL's scroll_sum, which starts counting 12 px into the drag: with that,
+   * a 9 mm swipe on the 2.8" screen registered barely enough to turn. */
+  int32_t dx, dy, peak;
+  touch_last_gesture(&dx, &dy, &peak);
+  lv_coord_t moved = dx ? (lv_coord_t)dx : p.scroll_sum.x;
+  /* A twelfth of the width, less for a flick: the panel is read 50 times a
+   * second, so a quick flick is only a few samples and never registers its
+   * whole length. */
+  const bool flick = peak >= FLICK_PX_PER_READ;
+  lv_coord_t need = flick ? LV_MAX(16, s_w / 16) : LV_MAX(20, s_w / 12);
   if (LV_ABS(moved) < need) return;  /* a nudge: let it settle back */
   lv_coord_t push = moved > 0 ? s_w / 3 : -s_w / 3;
   if ((p.scroll_throw_vect.x > 0) != (push > 0) || LV_ABS(p.scroll_throw_vect.x) < LV_ABS(push))

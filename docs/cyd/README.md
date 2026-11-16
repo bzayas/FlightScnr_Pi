@@ -32,6 +32,7 @@ FlightScnr CYD is a port of [FlightScnr Pi](https://github.com/yashmulgaonkar/Fl
 | [5. Settings reference](settings.md) | Every setting, its default, and what it does. |
 | [6. The device portal](portal.md) | Changing settings from a phone or computer on your network. |
 | [7. Data sources and privacy](data-and-privacy.md) | Where the data comes from, API keys, rate limits, what is sent where. |
+| [Security](security.md) | What the display puts on your network, how it is protected, and locking the portal. |
 | [8. Troubleshooting](troubleshooting.md) | The device log, what the log lines mean, and fixes for common problems. |
 | [9. Development](development.md) | Building from source, the simulator, tests, architecture and releases. |
 

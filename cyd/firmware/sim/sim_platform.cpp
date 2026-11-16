@@ -20,6 +20,7 @@
 #include "core/platform.h"
 
 uint32_t g_sim_ms = 1000;
+uint32_t g_sim_start_ms = 1000; /* --uptime-ms: start the run this far into the 32-bit millisecond clock */
 time_t g_sim_epoch = 0;
 uint8_t g_sim_backlight = 0;
 uint8_t g_sim_disclaimer = 0;
@@ -32,7 +33,9 @@ extern "C" void plat_lv_assert(void) {
   abort();
 }
 
-time_t plat_now() { return g_sim_epoch ? g_sim_epoch + (g_sim_ms - 1000) / 1000 : 0; }
+/* Wall time runs from the start of the simulation, whatever the uptime
+ * clock says (and across its 49.7-day wrap), as on the device. */
+time_t plat_now() { return g_sim_epoch ? g_sim_epoch + (uint32_t)(g_sim_ms - g_sim_start_ms) / 1000 : 0; }
 bool plat_time_valid() { return plat_now() != 0; }
 void plat_apply_timezone(const char* posix) {
   setenv("TZ", posix && *posix ? posix : "UTC0", 1);
@@ -56,6 +59,9 @@ bool plat_boot_key_pressed() { return false; }
 void plat_start_setup_ap() {}
 void plat_refresh_data() {}
 const char* plat_device_name() { return "FlightScnr-1A2B"; }
+uint32_t plat_uptime_s() { return (uint32_t)(g_sim_ms - g_sim_start_ms) / 1000 + 12 * 86400 + 4 * 3600; }
+uint32_t plat_restart_count() { return 0; }
+const char* plat_reset_reason() { return "power on"; }
 uint32_t plat_free_heap() { return 96 * 1024; }
 #include <malloc.h>
 /* Host heap use between marks (64-bit: LVGL objects run ~1.5-2x ESP32 size). */

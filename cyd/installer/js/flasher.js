@@ -13,6 +13,30 @@
 import { CFG_FLAG_INSTALLER, CFG_HEADER_SIZE, CFG_PARTITION, CFG_SLOT_SIZE, asset } from './schema.js';
 
 export const ESPTOOL_URL = 'https://unpkg.com/esptool-js@0.7.0/bundle.js';
+// SHA-256 of that exact file. The flashing library runs in this page, next
+// to the Wi-Fi password and API key being typed, so it is checked before it
+// runs: a file that was changed on the CDN, or on the way from it, is
+// refused instead of trusted. Update both lines together.
+export const ESPTOOL_SHA256 = '00ebe6fb0b202976d3e2a3c6b9a6bd438c26a81d2af6739c95ac276a64c1a84e';
+
+export async function loadEsptool() {
+  let res;
+  try {
+    res = await fetch(ESPTOOL_URL);
+  } catch {
+    throw new Error('Couldn’t download the flashing library (esptool-js). Check the internet connection and try again.');
+  }
+  if (!res.ok) throw new Error(`Couldn’t download the flashing library (HTTP ${res.status}).`);
+  const bytes = await res.arrayBuffer();
+  const digest = Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', bytes)), (b) => b.toString(16).padStart(2, '0')).join('');
+  if (digest !== ESPTOOL_SHA256) throw new Error('The flashing library that arrived is not the one this installer was built for, so it was not run. Try again later, or on another network.');
+  const url = URL.createObjectURL(new Blob([bytes], { type: 'text/javascript' }));
+  try {
+    return await import(url);
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+}
 
 /* ---- checksums -------------------------------------------------------- */
 
@@ -169,7 +193,7 @@ export class Device {
   }
 
   async connect(baud = 460800) {
-    const { ESPLoader, Transport } = await import(ESPTOOL_URL);
+    const { ESPLoader, Transport } = await loadEsptool();
     const port = await navigator.serial.requestPort();
     this.port = port;
     this.transport = new Transport(port, false);
