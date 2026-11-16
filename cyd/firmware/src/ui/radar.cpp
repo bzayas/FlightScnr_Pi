@@ -729,6 +729,30 @@ static void radar_timer_cb(lv_timer_t*) {
 /* Drawing                                                                   */
 /* ------------------------------------------------------------------------ */
 
+/* The sweep's trail as a wedge: two lines through the centre. A pixel can
+ * only be in it when it is on the right side of both, which two
+ * multiplications tell; only those pixels need their bearing worked out.
+ * (The trail's bounding box is more than half empty.) */
+struct Wedge {
+  float ex, ey; /* unit vector of the trail's end (30 degrees behind the sweep) */
+  float wx, wy; /* unit vector of the sweep line */
+  bool has(float dx, float dy) const {
+    /* 1.5 px of slack: the exact test that follows decides the edges */
+    return ex * dy - ey * dx >= -1.5f && dx * wy - dy * wx >= -1.5f;
+  }
+};
+
+static Wedge trail_wedge() {
+  Wedge w;
+  const float k = (float)(M_PI / 180.0);
+  float a = (s_sweep - TRAIL_DEG) * k, b = s_sweep * k;
+  w.ex = sinf(a);
+  w.ey = -cosf(a);
+  w.wx = sinf(b);
+  w.wy = -cosf(b);
+  return w;
+}
+
 /* Full screen: the field fills the object's rectangle. */
 static void draw_field_rect(Fx& f, float acx, float acy, const lv_area_t& tb, const lv_color_t* trail,
                             float inv_step) {
@@ -738,13 +762,14 @@ static void draw_field_rect(Fx& f, float acx, float acy, const lv_area_t& tb, co
   bool sweep = sweeping();
   int32_t y0 = LV_MAX(f.cy0, o.y1), y1 = LV_MIN(f.cy1, o.y2);
   int32_t xa = LV_MAX(f.cx0, o.x1), xb = LV_MIN(f.cx1, o.x2);
+  const Wedge wedge = trail_wedge();
   for (int32_t y = y0; y <= y1; y++) {
     lv_color_t* row = f.buf + (y - f.by) * f.stride - f.bx;
     bool row_in_trail = sweep && y >= tb.y1 && y <= tb.y2;
     float dy = y - acy;
     for (int32_t x = xa; x <= xb; x++) {
       lv_color_t c = disc;
-      if (row_in_trail && x >= tb.x1 && x <= tb.x2) {
+      if (row_in_trail && x >= tb.x1 && x <= tb.x2 && wedge.has(x - acx, dy)) {
         float d = s_sweep - fx_fast_atan2_deg(x - acx, dy);
         if (d < 0) d += 360.0f;
         if (d < TRAIL_DEG) c = trail[(int)(d * inv_step)];
@@ -770,6 +795,7 @@ static void draw_disc(Fx& f, float acx, float acy) {
   if (s_rect) {
     draw_field_rect(f, acx, acy, tb, trail, inv_step);
   } else {
+  const Wedge wedge = trail_wedge();
   int32_t y0 = LV_MAX(f.cy0, (int32_t)floorf(acy - R - 1)), y1 = LV_MIN(f.cy1, (int32_t)ceilf(acy + R + 1));
   for (int32_t y = y0; y <= y1; y++) {
     float dy = y - acy;
@@ -784,7 +810,7 @@ static void draw_disc(Fx& f, float acx, float acy) {
     bool row_in_trail = sweep && y >= tb.y1 && y <= tb.y2;
     for (int32_t x = xa; x <= xb; x++) {
       lv_color_t c = disc;
-      if (row_in_trail && x >= tb.x1 && x <= tb.x2) {
+      if (row_in_trail && x >= tb.x1 && x <= tb.x2 && wedge.has(x - acx, dy)) {
         float dx = x - acx;
         float d = s_sweep - fx_fast_atan2_deg(dx, dy);
         if (d < 0) d += 360.0f;
@@ -826,11 +852,21 @@ static void draw_dashed_ring(Fx& f, float cx, float cy, float r, lv_color_t c, u
   if (n < 4) n = 4;
   float step = 360.0f / n, dash_deg = step * dash / (dash + gap);
   if (!fx_intersects(f, cx - r - 2, cy - r - 2, cx + r + 2, cy + r + 2)) return;
+  /* Each dash is the one before, turned by `step`: a rotation (four
+   * multiplications) in place of four sines and cosines per dash, for every
+   * band of every frame the ring is in. */
+  const float k = (float)(M_PI / 180.0);
+  const float cs = cosf(step * k), sn = sinf(step * k);
+  float ux = 0, uy = -r;                                             /* dash start, from the centre: north */
+  float vx = r * sinf(dash_deg * k), vy = -r * cosf(dash_deg * k);   /* dash end */
   for (int i = 0; i < n; i++) {
-    float a0 = i * step, a1 = a0 + dash_deg;
-    float x0, y0, x1, y1;
-    fx_polar(cx, cy, r, a0, &x0, &y0);
-    fx_polar(cx, cy, r, a1, &x1, &y1);
+    float x0 = cx + ux, y0 = cy + uy, x1 = cx + vx, y1 = cy + vy;
+    float t = ux * cs - uy * sn; /* clockwise on a screen whose y runs down */
+    uy = ux * sn + uy * cs;
+    ux = t;
+    t = vx * cs - vy * sn;
+    vy = vx * sn + vy * cs;
+    vx = t;
     if (!fx_intersects(f, fminf(x0, x1) - 2, fminf(y0, y1) - 2, fmaxf(x0, x1) + 2, fmaxf(y0, y1) + 2)) continue;
     fx_capsule(f, x0, y0, x1, y1, 0.85f, c, opa);
   }

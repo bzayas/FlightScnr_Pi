@@ -13,6 +13,48 @@
 
 Versions are `year.month.day.iteration`. The version you're running is under **Settings → About** on the display.
 
+## 2026.11.16.1
+
+A review of the whole project after two months of continuous running: security, long-uptime behaviour, touch and speed. After updating, the setup hotspot has a new password (shown on the display).
+
+### Security
+
+See [Security](../docs/cyd/security.md) for what the display exposes and how it is protected.
+
+- **The portal can't be used by other web sites.** A page you visit elsewhere could previously send commands to the display through your browser (change settings, factory-reset it), and a site that pointed its own name at the display could read its settings, including your location. Requests must now name the display itself, changes must be JSON from the portal's own page, and the page can't be framed.
+- **New web server for the portal**, with limits everywhere: 2 KB of headers, 8 KB of body, 3 seconds per request. The previous one read requests of any size into memory, so one large request could exhaust the display's ~60 KB.
+- **Lock portal** (Settings on the display; also in the installer): the portal then shows the display's name and version only. It can only be unlocked on the screen or over USB.
+- **The setup hotspot's password is now random.** It was derived from the board's hardware address, which the hotspot broadcasts, so anyone in range could work it out. It is no longer written to the device log.
+- **The hotspot opens less readily:** after an outage it waits 5 minutes (it was 45 seconds), so a router restarting doesn't put a second network on the air. 45 seconds still applies when the display has just started.
+- The portal page runs only the scripts it was built with (a Content-Security-Policy with checksums) and sends data only to the place search and the Tomorrow.io key test.
+- **The installer checks the flashing library** against a known checksum before running it, instead of trusting whatever the CDN delivers.
+- Data from feeds is treated as untrusted: numbers are range-checked, callsigns and registrations are reduced to letters and digits before they are used in requests or stored, and two out-of-bounds reads were fixed (a date parser, and Wi-Fi setup over USB).
+- Settings are validated: latitude and longitude must be real coordinates, the device name a valid hostname.
+- A server that answers very slowly can no longer hold a secure connection open past the request's time limit.
+
+### Long uptime
+
+- **The radar sweep stays smooth.** It was computed from the uptime in a way that lost precision as the days passed: after a week the sweep moved at half its frame rate, and after a month it jumped 15° four times a second until the display was restarted. The alert pulses and helicopter rotors had the same flaw. All now run on an exact clock.
+- **49.7 days of uptime** (where the millisecond counter wraps) no longer upsets anything: aircraft tags could stop being re-placed, and Tomorrow.io could stay switched off for days after a rate-limit pause.
+- **Self-healing:** the display restarts itself if the screen stops updating for 15 seconds or the network side for 5 minutes, and rejoins Wi-Fi if it is connected but no flight data has arrived for 15 minutes (a router that restarted and forgot it).
+- **About** and the portal's Status page show how long the display has been running (correctly past 49 days), why it last started, and whether it restarted itself.
+
+### Touch
+
+- **Page swipes with a finger are far more reliable.** A swipe is now counted from where the finger lands, not from 12 px into the drag, and a quick flick needs less travel. In a simulated test of 25,600 finger gestures, 2 fail; with the previous rules about 1 swipe in 20 failed on the 2.8″ screen in portrait.
+- **Swipe or scroll is decided more carefully.** The direction was decided after 8 px, where a fingertip's jitter sometimes turned a scroll into a page drag that went nowhere. It is now decided at 14 px.
+
+### Speed
+
+- The radar's sweep shading and dashed range rings take less work: 13% less in the radar, 6.5% overall in the simulator's benchmark.
+- The portal's server sleeps until a request arrives instead of polling every 3 ms, and the firmware is 30 KB smaller.
+
+### For developers
+
+- `fs_sim --uptime-ms` starts the simulator at any uptime; CI runs the suite at 40 days and across the counter wrap. A motion check measures the sweep.
+- A randomized touch stress test (320 gestures) runs at every screen size; the simulator now uses the device's input settings, loop timing and draw bands.
+- `test/portal`: unit tests for the request policy, an attack script against the server built with AddressSanitizer, and a browser test of the real page.
+
 ## 2026.10.7.9
 
 - **Customize, redesigned.**

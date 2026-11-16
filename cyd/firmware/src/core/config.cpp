@@ -228,13 +228,15 @@ bool cfg_apply_json(AppConfig& c, const char* json, size_t len, bool keep_blank)
   }
   JsonObjectConst l = root["loc"];
   if (!l.isNull()) {
-    /* both or neither, and only a real place on Earth */
-    if (l["lat"].is<double>() && l["lon"].is<double>()) {
-      double la = l["lat"].as<double>(), lo = l["lon"].as<double>();
-      if (fabs(la) <= 90 && fabs(lo) <= 180) {
-        c.lat = la;
-        c.lon = lo;
-      }
+    /* only a real place on Earth; each on its own, since the portal sends
+     * just the field that changed */
+    if (l["lat"].is<double>()) {
+      double la = l["lat"].as<double>();
+      if (fabs(la) <= 90) c.lat = la;
+    }
+    if (l["lon"].is<double>()) {
+      double lo = l["lon"].as<double>();
+      if (fabs(lo) <= 180) c.lon = lo;
     }
     get_str(l["name"], c.loc_name);
     get_str(l["tz"], c.tz_name);

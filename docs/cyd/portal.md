@@ -19,7 +19,7 @@ The display runs its own small web page, the **portal**. From any phone, tablet 
 
 On the display, open **Settings → Portal**. It shows the address, for example `http://192.168.1.42`, and a QR code: scan it with your phone's camera.
 
-You can also type the address into any browser. Many home routers also know the display by its device name (`flightscnr` unless you changed it), so `http://flightscnr` may work too. If it doesn't, use the address.
+You can also type the address into any browser. Many home routers also know the display by its device name (`flightscnr` unless you changed it), so `http://flightscnr` or `http://flightscnr.lan` may work too. If it doesn't, use the address. The portal only answers to its own address and device name: reached under any other name, it replies *open the display by its address*.
 
 During setup, when the display is running its own hotspot, the portal is at **http://192.168.4.1**, and most phones open it automatically when they join the hotspot.
 
@@ -29,8 +29,8 @@ The portal has the same pages as the web installer, minus the flashing, plus **S
 
 | Page | |
 |---|---|
-| **Status** | Live from the display, updated every 5 seconds: device name, firmware version, board, uptime and free memory; Wi-Fi network, signal and address; the clock; which flight feed is answering, how many aircraft and how long ago; the current weather and its source. |
-| **Wi-Fi** | Lists the networks the display can see. Pick one, enter the password, and save: the display switches network. |
+| **Status** | Live from the display, updated every 5 seconds: device name, firmware version, board, how long it has been running, why it last started and whether it has restarted itself, and free memory; Wi-Fi network, signal and address; the clock; which flight feed is answering, how many aircraft and how long ago; the current weather and its source. |
+| **Wi-Fi** | Lists the networks the display can see. Pick one, enter the password, and save: the display switches network. **Lock the portal** is here too. |
 | **Location, Weather, Flights & Radar, Scope, Alerts, Units, Display** | Every setting, as described in the [Settings reference](settings.md). |
 | **System** | Maintenance; see below. |
 
@@ -55,6 +55,15 @@ Firmware updates aren't done from the portal: use the [web installer](installing
 
 The display has very little memory, and the portal shares it with the radar and the network feeds. If a page says *Connecting to the display* for a long time, wait a few seconds and reload. The portal is one compressed page, so after the first load it only exchanges small bits of data.
 
+## Locking the portal
+
+The portal has no password: anyone on your network can open it and change settings. If you share your network, lock it.
+
+- On the display: **Settings → Lock portal**.
+- Or in the portal or the installer: **Wi-Fi → Lock the portal**, then save.
+
+A locked portal shows a page saying so, and gives nothing but the display's name and firmware version. It can only be unlocked on the display's own screen (**Settings → Lock portal**) or over USB with the installer. The [setup hotspot](first-start.md#3-getting-on-wi-fi) still works while it's locked.
+
 ## Security
 
-The portal has no password: anyone on your network can open it and change settings. That's normal for a home gadget, but don't put the display on an untrusted network such as a public Wi-Fi. Saved passwords and keys can't be read back through the portal.
+Web pages from elsewhere can't reach the portal through your browser, saved passwords and keys can't be read back through it, and oversized or malformed requests are refused. It is plain HTTP with no login, so don't put the display on an untrusted network such as a public Wi-Fi. [Security](security.md) has the details.

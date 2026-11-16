@@ -132,7 +132,7 @@ static void make_ap_credentials() {
   const size_t len = 10; /* 31^10: about 50 bits */
   Preferences p;
   p.begin("fs_state", false);
-  String stored = p.getString("appw", "");
+  String stored = p.isKey("appw") ? p.getString("appw", "") : String(); /* isKey: no error line on a first start */
   bool ok = stored.length() == len;
   for (size_t i = 0; ok && i < len; i++) ok = strchr(alphabet, stored[i]) != nullptr;
   if (ok) {
@@ -245,7 +245,8 @@ static void wifi_service() {
      * a quarter of an hour without a single flight update, join again; at
      * most every half hour, since the internet may simply be down. */
     uint32_t since = s_data_ok_ms ? s_data_ok_ms : s_connected_since;
-    if (has_location() && now - since > 15u * 60u * 1000u && now - s_rejoin_ms > 30u * 60u * 1000u) {
+    if (has_location() && nc.sources[0] != SRC_NONE && now - since > 15u * 60u * 1000u &&
+        now - s_rejoin_ms > 30u * 60u * 1000u) {
       s_rejoin_ms = now;
       Serial.println("[net] no flight data for 15 minutes: joining Wi-Fi again");
       WiFi.disconnect(false, false);

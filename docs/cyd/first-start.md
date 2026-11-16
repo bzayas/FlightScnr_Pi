@@ -47,9 +47,9 @@ If you entered Wi-Fi in the installer, the display joins it straight away. You'l
 
 <img src="images/setup-card.png" width="180" align="right" alt="The setup card: a QR code for the setup hotspot">
 
-If it has no Wi-Fi details, or can't join its network for 45 seconds, it opens its own **setup hotspot** and shows a card like the one on the right:
+If it has no Wi-Fi details, or can't join its network, it opens its own **setup hotspot** and shows a card like the one on the right. It waits 45 seconds when it has just started, and 5 minutes if it was online before, so a router that is only restarting doesn't trigger it.
 
-1. Scan the QR code with your phone's camera, or join the network shown (**FlightScnr-XXXX**) with the password shown. The password is the same every time for a given board.
+1. Scan the QR code with your phone's camera, or join the network shown (**FlightScnr-XXXX**) with the password shown. The password is random, different for every board, and stays the same until a factory reset.
 2. Your phone should open the setup page by itself. If it doesn't, open **http://192.168.4.1**.
 3. On the **Wi-Fi** page, pick your network, enter its password and save. The display joins it.
 

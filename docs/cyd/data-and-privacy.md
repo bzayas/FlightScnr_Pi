@@ -77,13 +77,15 @@ Keep the online feeds on below it: they fill in whenever the receiver doesn't an
 
 Nothing else leaves the display: no analytics, no accounts, no cloud service of our own. Your Wi-Fi password and Tomorrow.io key are stored only on the display and are never shown by the portal.
 
+Requests go over HTTPS with the server's certificate checked. For the first seconds after power-on, before the clock is set, the keyless feeds (adsb.lol, Open-Meteo) may be asked over plain HTTP; see [Security](security.md#what-the-display-connects-to).
+
 If you'd rather not share your exact position, enter your coordinates rounded to two decimal places (about 1 km). The radar is just as useful.
 
 ### The installer
 
 The web installer is a static page: your settings stay in your browser and are written to the board over USB. The Wi-Fi password and key are kept in memory only, and are never saved by the browser or sent anywhere except to the board. The installer itself contacts:
 
-- **unpkg.com**, to load the flashing library (esptool-js, and ESP Web Tools on the Quick flash page);
+- **unpkg.com**, to load the flashing library (esptool-js, which is checked against a known checksum before it runs; and ESP Web Tools on the Quick flash page, which is not);
 - **Open-Meteo's place search**, when you search for a place;
 - **BigDataCloud**, to name the place when you press *Use my current location*;
 - **Tomorrow.io**, when you press *Test key*.

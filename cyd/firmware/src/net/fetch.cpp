@@ -142,10 +142,21 @@ static unsigned char s_buf[BR_SSL_BUFSIZE_MONO];
 static br_ec_impl s_ec;
 static int s_fd = -1;
 static bool s_timed_out;
+/* The request's overall deadline, for the TLS callbacks: each socket wait
+ * has its own timeout, but a server that sends a little every few seconds
+ * could otherwise keep a handshake going for as long as it liked. */
+static uint32_t s_deadline;
+
+static bool past_deadline() {
+  if ((int32_t)(fetch_platform_ms() - s_deadline) <= 0) return false;
+  s_timed_out = true;
+  return true;
+}
 
 static int sock_read(void* ctx, unsigned char* buf, size_t len) {
   int fd = *(int*)ctx;
   for (;;) {
+    if (past_deadline()) return -1;
     int r = (int)recv(fd, buf, len, 0);
     if (r > 0) return r;
     if (r < 0 && errno == EINTR) continue;
@@ -157,6 +168,7 @@ static int sock_read(void* ctx, unsigned char* buf, size_t len) {
 static int sock_write(void* ctx, const unsigned char* buf, size_t len) {
   int fd = *(int*)ctx;
   for (;;) {
+    if (past_deadline()) return -1;
     int r = (int)send(fd, buf, len, 0);
     if (r > 0) return r;
     if (r < 0 && errno == EINTR) continue;
@@ -251,6 +263,7 @@ int Fetch::get(const char* url, uint32_t timeout_ms, const char* user_agent) {
   if (!fetch_parse_url(url, u)) return FETCH_ERR_URL;
   /* An overall cap, so a server that drips data can't hold the task. */
   deadline_ = fetch_platform_ms() + (timeout_ms < 10000 ? 20000 : timeout_ms * 2);
+  s_deadline = deadline_;
 
   /* Connecting, the handshake and the headers get at most 8 s: a server
    * that stalls there (some of Open-Meteo's do on TLS 1.2) is better

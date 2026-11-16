@@ -27,7 +27,8 @@ Defaults match FlightScnr Pi's where it has an equivalent.
 |---|---|---|
 | **Network name** | (none) | Your 2.4 GHz network. Without one, the display opens its [setup hotspot](first-start.md#3-getting-on-wi-fi). Up to 32 bytes. |
 | **Password** | (none) | 8–63 characters; leave blank for an open network. Never shown again once saved. |
-| **Device name** | `flightscnr` | The name your router lists the display as. |
+| **Device name** | `flightscnr` | The name your router lists the display as, and a name the [portal](portal.md) answers to. Letters, digits and hyphens. |
+| **Lock the portal** | Off | The [portal](portal.md#locking-the-portal) then shows the display's name and version only. Unlock it on the display, or over USB with the installer. |
 
 In the portal, the Wi-Fi page also lists the networks the display can see.
 
@@ -158,10 +159,11 @@ The display's **Settings** page also has:
 |---|---|
 | **Wi-Fi** | The network it's on and the signal strength. |
 | **Portal** | The display's address, with a QR code to open the [portal](portal.md) on your phone. |
+| **Lock portal** | [Locks the portal](portal.md#locking-the-portal): it shows status only. This switch is the only way to unlock it without a USB cable. |
 | **Start setup hotspot** | Opens the [setup hotspot](first-start.md#3-getting-on-wi-fi), for example to move the display to another network. |
 | **Refresh data now** | Fetches flights, weather and earthquakes straight away. |
 | **Calibrate touch** | Runs [touch calibration](first-start.md#1-touch-calibration-only-if-needed). |
-| **About** | Version, board, free memory, credits, data sources and the license. |
+| **About** | Version, credits, data sources and the license; how long the display has been running, why it last started, whether it restarted itself, and free memory. |
 | **Restart** | Restarts the display. |
 
 Settings changed on the display are saved straight away and show up in the portal and the installer's **Read settings from device**.

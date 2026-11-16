@@ -82,6 +82,9 @@ jobs:
       - name: HTTP/HTTPS client host tests (BearSSL)
         run: make -C test/fetch -j"$(nproc)" check
 
+      - name: Portal server and request policy (ASan, UBSan, attack script)
+        run: make -C test/portal check
+
       - name: Simulator renders every screen
         run: |
           make -C sim -j"$(nproc)"
@@ -89,6 +92,9 @@ jobs:
           sim/build/fs_sim --landscape --out sim/shots
           sim/build/fs_sim --small --out sim/shots
           sim/build/fs_sim --small --landscape --out sim/shots
+          # long uptimes: 40 days in, and across the 32-bit millisecond wrap
+          sim/build/fs_sim --small --landscape --uptime-ms 3456000000 --out sim/uptime
+          sim/build/fs_sim --uptime-ms 4294960000 --out sim/uptime
           python3 -m pip install --quiet pillow
           python3 - <<'EOF'
           import glob
